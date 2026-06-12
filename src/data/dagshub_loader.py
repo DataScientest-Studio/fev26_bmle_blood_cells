@@ -89,3 +89,27 @@ def ensure_source_100(data_dir: Path) -> bool:
 
     version_file.write_text(remote_hash)
     return True
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parents[2] / ".env")
+
+    print("Test connexion DagsHub...")
+
+    print("\n[1/2] Modèle DenseNet")
+    model_path = Path(__file__).parents[2] / "models" / "best_DenseNet_121.pth"
+    downloaded = ensure_model(model_path)
+    print(f"  Statut  : {'téléchargé' if downloaded else 'déjà à jour'}")
+    print(f"  Présent : {model_path.exists()}")
+    if model_path.exists():
+        print(f"  Taille  : {model_path.stat().st_size / 1024 / 1024:.1f} MB")
+
+    print("\n[2/2] Source_100 (images de test)")
+    data_dir = Path(__file__).parents[2] / "data" / "Source_100"
+    downloaded = ensure_source_100(data_dir)
+    count = sum(1 for _ in data_dir.rglob("*.jpg")) if data_dir.exists() else 0
+    print(f"  Statut  : {'téléchargé' if downloaded else 'déjà à jour'}")
+    print(f"  Images  : {count}/100")
+
+    print("\nConnexion DagsHub OK")

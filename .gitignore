@@ -123,6 +123,7 @@ dmypy.json
 
 # IDE
 .vscode/
+!.vscode/launch.json
 .idea/
 
 # OS
