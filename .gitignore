@@ -1,5 +1,6 @@
 #Dossiers à ignorer
 data/
+!src/data/
 CellImagesSource1/
 CellImagesSource/
 src/independent_scripts/outputs/

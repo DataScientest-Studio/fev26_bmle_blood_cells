@@ -18,10 +18,27 @@ from functools import lru_cache
 import numpy as np
 import streamlit as st
 from PIL import Image
+from dotenv import load_dotenv
 
 # ── Chemin racine du projet ───────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+
+load_dotenv(ROOT / ".env")
+
+# ── Synchronisation DagsHub (modèle + images de test) ────────────────────────
+from src.data.dagshub_loader import ensure_model, ensure_source_100
+
+DAGSHUB_MODEL_PATH = ROOT / "models" / "best_DenseNet_121.pth"
+DAGSHUB_SOURCE_100 = ROOT / "data" / "Source_100"
+
+try:
+    downloaded = ensure_model(DAGSHUB_MODEL_PATH)
+    if downloaded:
+        st.toast("Modèle DenseNet mis à jour depuis DagsHub.", icon="✅")
+    ensure_source_100(DAGSHUB_SOURCE_100)
+except Exception as _e:
+    st.warning(f"DagsHub inaccessible — utilisation du modèle local si disponible. ({_e})")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CLASSES = [
@@ -269,9 +286,13 @@ def main() -> None:
             for model_key, active in active_dl.items():
                 if not active:
                     continue
-                fold = 1
-                pth_name = f"best_fold{fold}_{model_key.replace('-', '_').replace(' ', '_')}.pth"
-                pth_path = model_dir / pth_name
+                if model_key == "DenseNet-121":
+                    pth_name = "best_DenseNet_121.pth"
+                    pth_path = DAGSHUB_MODEL_PATH if DAGSHUB_MODEL_PATH.exists() else model_dir / pth_name
+                else:
+                    fold = 1
+                    pth_name = f"best_fold{fold}_{model_key.replace('-', '_').replace(' ', '_')}.pth"
+                    pth_path = model_dir / pth_name
                 if pth_path.exists():
                     try:
                         model, device = load_dl_model(model_key, str(pth_path))
