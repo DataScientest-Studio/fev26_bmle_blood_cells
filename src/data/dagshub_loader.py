@@ -7,6 +7,8 @@ from pathlib import Path
 import requests
 import yaml
 
+_HERE = Path(__file__).parent
+
 
 def _auth() -> tuple[str, str]:
     user = os.getenv("DAGSHUB_USER", "")
@@ -50,7 +52,7 @@ def ensure_model(model_path: Path) -> bool:
     """Ensure DenseNet model is local and up to date.
 
     Fetches Models.dvc hash (< 1 KB) at each startup.
-    Re-downloads the model (~27 MB) only if the hash differs.
+    Re-downloads (~27 MB) only if the hash differs.
     Returns True if the model was (re)downloaded.
     """
     version_file = model_path.parent / ".model_version"
@@ -59,20 +61,10 @@ def ensure_model(model_path: Path) -> bool:
     if model_path.exists() and _cached_hash(version_file) == remote_hash:
         return False
 
-    url = f"{_base_url()}/resolve/main/Models/best_DenseNet_121.pth"
+    url = f"{_base_url()}/raw/main/Models/best_DenseNet_121.pth"
     _download_stream(url, model_path)
     version_file.write_text(remote_hash)
     return True
-
-
-def _fetch_dir_manifest(dir_hash: str) -> list[dict]:
-    """Fetch the DVC .dir manifest listing individual file hashes and paths."""
-    prefix = dir_hash[:2]
-    rest = dir_hash[2:].replace(".dir", "")
-    url = f"{_base_url()}.dvc/files/md5/{prefix}/{rest}"
-    r = requests.get(url, auth=_auth(), timeout=10)
-    r.raise_for_status()
-    return json.loads(r.text)
 
 
 def ensure_source_100(data_dir: Path) -> bool:
@@ -88,14 +80,12 @@ def ensure_source_100(data_dir: Path) -> bool:
     if data_dir.exists() and _cached_hash(version_file) == remote_hash:
         return False
 
-    entries = _fetch_dir_manifest(remote_hash)
-    for entry in entries:
-        rel_path = entry["relpath"]
-        file_hash = entry["md5"]
-        prefix, rest = file_hash[:2], file_hash[2:]
-        url = f"{_base_url()}.dvc/files/md5/{prefix}/{rest}"
-        dest = data_dir / rel_path
-        _download_stream(url, dest)
+    manifest_path = _HERE / "source_100_manifest.json"
+    files = json.loads(manifest_path.read_text())
+
+    for rel_path in files:
+        url = f"{_base_url()}/raw/main/Source_100/{rel_path}"
+        _download_stream(url, data_dir / rel_path)
 
     version_file.write_text(remote_hash)
     return True
