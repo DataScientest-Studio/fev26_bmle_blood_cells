@@ -134,7 +134,8 @@ Thumbs.db
 
 # DVC
 .dvc/tmp/
-*.dvc
+!.dvc/
+!*.dvc
 
 # DL pipeline — fichiers lourds générés
 reports/**/*.pth
