@@ -1,0 +1,44 @@
+model:
+  name: DenseNet-121
+  timm_name: densenet121
+  num_classes: 8
+  input_size: 224
+  pretrained: true
+
+classes:
+  - basophil
+  - eosinophil
+  - erythroblast
+  - ig
+  - lymphocyte
+  - monocyte
+  - neutrophil
+  - platelet
+
+training:
+  epochs: 20
+  batch_size: 32
+  optimizer: adam
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  scheduler: cosine
+  early_stopping_patience: 5
+  cross_validation:
+    n_folds: 5
+    stratified: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation_degrees: 15
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+paths:
+  model_output: models/densenet121_crossval_v1/
+  reports_output: reports/DL_crossval_results/

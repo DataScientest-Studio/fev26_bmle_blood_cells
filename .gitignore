@@ -1,38 +1,17 @@
-# Data
-data/raw/
-data/processed/
-data/interim/
-*.csv
-*.xlsx
-*.parquet
+#Dossiers à ignorer
+data/
+!src/data/
+CellImagesSource1/
+CellImagesSource/
+src/independent_scripts/outputs/
+outputs/
 
-# Models
-models/*.pth
-models/*.pkl
-models/*.h5
-
-# MLflow & Logs
-mlruns/
-.mlflow/
-logs/
-*.log
-
-# DVC
-.dvc/tmp/
-*.dvc
-
-# Virtual environment
-venv/
-env/
-
-# Jupyter & Notebooks
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
 .Python
 build/
@@ -48,9 +27,101 @@ sdist/
 var/
 wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.env.local
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
 
 # IDE
 .vscode/
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
@@ -59,7 +130,57 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+.claude/
 
-# Environment
-.env
-.env.local
+# DVC
+.dvc/tmp/
+*.dvc
+
+# DL pipeline — fichiers lourds générés
+reports/**/*.pth
+reports/DL_pipeline_report_2000images/*.png
+reports/DL_pipeline_report_2000images/*.csv
+DL_pipeline_v1.zip
+DL_pipeline_v1/
+mlflow.db
+src/jupyter/mlflow.db
+src/jupyter/Romane_DL_pipeline_jupyter/mlflow.db
+logs/
+
+# Poids des modèles hyperparam (trop lourds pour git, jusqu'à 107 MB)
+reports/DL_hyperparam_activations/*.pth
+reports/DL_hyperparam_activations/*.tmp
+reports/DL_hyperparam_epochs_lr/
+
+# Modèles lourds — tous les .pth (28–107 MB par fichier, refusés par GitHub)
+reports/**/*.pth
+reports/DL_crossval_ameliorees/**/*.json
+reports/DL_crossval_models/ml_features_cache.npz
+
+# MLflow tracking
+mlruns/
+mlartifacts/
+
+# Fichiers Word générés (sauf rapports MLOps versionnés)
+*.docx
+!reports/MLOps_fichiers_transfert_DenseNet121.docx
+
+# Logs de run
+reports/*.log
+
+# Images test locales (générées depuis dataset local, non versionnées)
+reports/DL_crossval_ameliorees/ImagesTest/
+
+# Environnements virtuels
+.venv310/
+.venv313/
+catboost_info/
+
+# Nouveaux dossiers — données et modèles lourds
+data/raw/
+data/processed/
+data/interim/
+models/**/*.pth
+
+# Fichiers temporaires de génération
+generate_reorganisation_doc.py

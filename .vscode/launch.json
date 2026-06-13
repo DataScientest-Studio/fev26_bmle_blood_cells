@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Test DagsHub connection",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.data.dagshub_loader",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": true
+        }
+    ]
+}
