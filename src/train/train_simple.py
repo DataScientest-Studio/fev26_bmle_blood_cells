@@ -72,7 +72,7 @@ print(f"Classes    : {CLASS_NAMES}")
 print(f"Output dir : {OUTPUT_DIR}")
 
 
-# ── Dataset ─────────────────────────────────────────────────────────────[...]
+# ── Dataset ───────────────────────────────────────────────────────────��[...]
 
 def load_paths():
     paths, labels = [], []
@@ -242,7 +242,7 @@ def train_model(model_key: str):
     print(f"\n  Meilleur val_acc : {best_val_acc:.4f}")
     print(f"  Sauvegardé      : {save_path}")
 
-    # ── Eval test ───────────────────────────────────────────────────────────[...]
+    # ── Eval test ─────────────────────────────────────────────────────────�[...]
     test_paths = [all_paths[i] for i in idx_test]
     test_lbls = [all_labels[i] for i in idx_test]
     test_dl = DataLoader(CellDataset(test_paths, test_lbls, tf),
@@ -253,7 +253,7 @@ def train_model(model_key: str):
     print(f"  Test accuracy   : {test_acc:.4f}")
 
 
-# ── Main ──────────────────────────────────────────────────────────────[...]
+# ── Main ────────────────────────────────────────────────────────────�[...]
 if __name__ == "__main__":
     for key in MODELS_TO_TRAIN:
         train_model(key)
