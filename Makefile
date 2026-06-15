@@ -1,4 +1,4 @@
-PYTHON = C:/Users/julie/Anaconda3/python.exe
+PYTHON = python
 ROOT   = .
 
 .PHONY: help install streamlit-app streamlit-folder test lint clean

@@ -28,16 +28,16 @@ else:
 
 print(f"Using device: {DEVICE}")
 
-# Classes de cellules sanguines
+# Classes de cellules sanguines — ordre identique à configs/densenet121.yaml et tests/
 CLASSES = [
     "Basophil",
     "Eosinophil",
     "Erythroblast",
+    "IG",
     "Lymphocyte",
     "Monocyte",
     "Neutrophil",
     "Platelet",
-    "Promyelocyte"
 ]
 
 NUM_CLASSES = len(CLASSES)
