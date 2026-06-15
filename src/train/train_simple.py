@@ -22,7 +22,7 @@ from torchvision import transforms
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────[...]
 DATA_DIR   = Path("/Users/fredericdelabot/Documents/DataScientest/Projet CHU Lyon"
                   "/mendeley/1/PBC_dataset_normal_DIB")
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "reports/Fred_DL_pipeline_report_full"
@@ -72,7 +72,7 @@ print(f"Classes    : {CLASS_NAMES}")
 print(f"Output dir : {OUTPUT_DIR}")
 
 
-# ── Dataset ────────────────────────────────────────────────────────────────────
+# ── Dataset ─────────────────────────────────────────────────────────────[...]
 
 def load_paths():
     paths, labels = [], []
@@ -104,7 +104,7 @@ def get_transforms(input_size):
     ])
 
 
-# ── Split ──────────────────────────────────────────────────────────────────────
+# ── Split ────────────────────────────────────────────────────────────[...]
 all_paths, all_labels = load_paths()
 print(f"Total images : {len(all_paths)}")
 
@@ -118,7 +118,7 @@ idx_train, idx_val = train_test_split(idx_trainval,
 print(f"Train: {len(idx_train)}  Val: {len(idx_val)}  Test: {len(idx_test)}")
 
 
-# ── Training ───────────────────────────────────────────────────────────────────
+# ── Training ───────────────────────────────────────────────────────────[...]
 
 def train_one_epoch(model, loader, opt, crit):
     model.train()
@@ -219,8 +219,10 @@ def train_model(model_key: str):
         tl, ta = train_one_epoch(model, train_dl, opt, crit)
         vl, va = evaluate(model, val_dl, crit)
         sch.step()
-        history["train_loss"].append(tl); history["val_loss"].append(vl)
-        history["train_acc"].append(ta);  history["val_acc"].append(va)
+        history["train_loss"].append(tl)
+        history["val_loss"].append(vl)
+        history["train_acc"].append(ta)
+        history["val_acc"].append(va)
         improved = va > best_val_acc
         if improved:
             best_val_acc = va
@@ -240,18 +242,18 @@ def train_model(model_key: str):
     print(f"\n  Meilleur val_acc : {best_val_acc:.4f}")
     print(f"  Sauvegardé      : {save_path}")
 
-    # ── Eval test ─────────────────────────────────────────────────────────────
+    # ── Eval test ───────────────────────────────────────────────────────────[...]
     test_paths = [all_paths[i] for i in idx_test]
-    test_lbls  = [all_labels[i] for i in idx_test]
-    test_dl    = DataLoader(CellDataset(test_paths, test_lbls, tf),
-                            batch_size=CFG["batch_size"], shuffle=False,
-                            num_workers=CFG["num_workers"])
+    test_lbls = [all_labels[i] for i in idx_test]
+    test_dl = DataLoader(CellDataset(test_paths, test_lbls, tf),
+                         batch_size=CFG["batch_size"], shuffle=False,
+                         num_workers=CFG["num_workers"])
     model.load_state_dict(torch.load(save_path, map_location=DEVICE, weights_only=True))
     _, test_acc = evaluate(model, test_dl, crit)
     print(f"  Test accuracy   : {test_acc:.4f}")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────[...]
 if __name__ == "__main__":
     for key in MODELS_TO_TRAIN:
         train_model(key)
@@ -264,4 +266,4 @@ if __name__ == "__main__":
     # Sauvegarde class_names pour l'inférence
     with open(OUTPUT_DIR / "class_names.json", "w") as f:
         json.dump(CLASS_NAMES, f)
-    print(f"  class_names.json")
+    print("  class_names.json")
