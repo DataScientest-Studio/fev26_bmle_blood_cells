@@ -25,11 +25,6 @@ dvc==3.67.1
 dvc-http==2.32.0
 pathspec>=0.9.0,<0.12
 
-# ── API & Web framework ───────────────────────────────────────────
-fastapi==0.115.0
-uvicorn==0.30.0
-pydantic==2.10.0
-
 # ── Deep learning (PyTorch) ───────────────────────────────────────
 torch==2.11.0
 torchvision==0.26.0
