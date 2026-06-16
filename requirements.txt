@@ -20,6 +20,11 @@ imbalanced-learn==0.14.1
 # ── Experiment tracking ───────────────────────────────────────────
 mlflow==3.11.1
 
+# ── Data versioning ───────────────────────────────────────────────
+dvc==3.67.1
+dvc-http==2.32.0
+pathspec>=0.9.0,<0.12
+
 # ── Deep learning (PyTorch) ───────────────────────────────────────
 torch==2.11.0
 torchvision==0.26.0
@@ -49,7 +54,7 @@ fastremap==1.18.0
 
 # ── Image file formats ────────────────────────────────────────────
 imagecodecs==2026.3.6
-tifffile==2026.4.11
+tifffile==2025.12.20
 
 # ── Utilities ─────────────────────────────────────────────────────
 tqdm==4.67.3

@@ -1,0 +1,91 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+*.egg
+.pyc
+.pyo
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+.venv310/
+.venv313/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local development
+.env
+.env.local
+*.log
+logs/
+
+# MLflow (recréé localement)
+mlruns/
+mlartifacts/
+
+# Données lourdes (téléchargées depuis DVC/DagsHub)
+data/raw/
+data/interim/
+CellImagesSource/
+CellImagesSource1/
+
+# Modèles lourds (téléchargés depuis DagsHub)
+models/**/*.pth
+reports/**/*.pth
+
+# Fichiers temporaires
+.claude/
+*.tmp
+*.temp
+generate_reorganisation_doc.py
+
+# Node/build artifacts
+node_modules/
+dist/
+build/
+
+# DL pipeline outputs (cachés localement)
+reports/DL_pipeline_report_2000images/
+reports/DL_hyperparam_activations/
+reports/DL_crossval_ameliorees/ImagesTest/
+DL_pipeline_v1/
+DL_pipeline_v1.zip
+
+# Docs / tests
+tests/fixtures/
+docs/
+*.md
+README.md
+LICENSE
+
+# Docker
+docker-compose*.dev.yml
+Dockerfile*
+.dockerignore

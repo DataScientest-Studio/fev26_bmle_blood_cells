@@ -1,0 +1,107 @@
+services:
+  # ═══════════════════════════════════════════════════════════════════
+  # 1️⃣ STREAMLIT — Interface utilisateur
+  # ═══════════════════════════════════════════════════════════════════
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blood_cell_streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      # Code hot-reload
+      - ./src/serving:/app/src/serving
+      - ./app:/app/app
+      - ./src/data:/app/src/data
+      # Données et modèles (partagés avec API)
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./mlruns:/app/mlruns
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_URL=http://api:8000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+      - SUPABASE_HOST=${SUPABASE_HOST}
+      - SUPABASE_PORT=${SUPABASE_PORT}
+      - SUPABASE_DB=${SUPABASE_DB}
+      - SUPABASE_USER=${SUPABASE_USER}
+      - SUPABASE_PASSWORD=${SUPABASE_PASSWORD}
+    depends_on:
+      - api
+      - mlflow
+    networks:
+      - ml_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ═══════════════════════════════════════════════════════════════════
+  # 2️⃣ FASTAPI — Backend ML
+  # ═══════════════════════════════════════════════════════════════════
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: blood_cell_api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Code hot-reload
+      - ./src:/app/src
+      - ./configs:/app/configs
+      - ./scripts:/app/scripts
+      # Données partagées
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./mlruns:/app/mlruns
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+    depends_on:
+      - mlflow
+    networks:
+      - ml_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ═══════════════════════════════════════════════════════════════════
+  # 3️⃣ MLFLOW — Experiment tracking
+  # ═══════════════════════════════════════════════════════════════════
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    container_name: blood_cell_mlflow
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlruns:/mlflow
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:////mlflow/mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    networks:
+      - ml_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ml_network:
+    driver: bridge
+    
