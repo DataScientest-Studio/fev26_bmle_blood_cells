@@ -309,7 +309,6 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
         mlflow.pytorch.log_model(
             model,
             name="densenet121",
-            serialization_format="pt2",
         )
 
         print(f"\nMeilleur val_acc : {best_val_acc:.4f}")
