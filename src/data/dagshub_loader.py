@@ -21,9 +21,9 @@ def _auth() -> tuple[str, str]:
 
 
 def _base_url() -> str:
-    user = os.getenv("DAGSHUB_USER", "Dumegan")
+    owner = os.getenv("DAGSHUB_REPO_OWNER", "Dumegan")
     repo = os.getenv("DAGSHUB_REPO", "Bloodcells-project")
-    return f"https://dagshub.com/{user}/{repo}"
+    return f"https://dagshub.com/{owner}/{repo}"
 
 
 def _remote_dvc_hash(dvc_filename: str) -> str:
