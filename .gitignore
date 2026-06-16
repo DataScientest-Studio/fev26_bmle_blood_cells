@@ -183,6 +183,8 @@ data/raw/
 data/processed/
 data/interim/
 models/**/*.pth
+models/.model_version
+data/.*_version
 
 # Fichiers temporaires de génération
 generate_reorganisation_doc.py

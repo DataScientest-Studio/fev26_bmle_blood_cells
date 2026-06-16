@@ -17,11 +17,11 @@ CLASSES = [
     "Basophil",
     "Eosinophil",
     "Erythroblast",
+    "IG",
     "Lymphocyte",
     "Monocyte",
     "Neutrophil",
     "Platelet",
-    "Promyelocyte"
 ]
 
 CRITICAL = {"Erythroblast"}
@@ -30,11 +30,11 @@ CLASS_EMOJI = {
     "Basophil": "B",
     "Eosinophil": "E",
     "Erythroblast": "R",
+    "IG": "IG",
     "Lymphocyte": "L",
     "Monocyte": "M",
     "Neutrophil": "N",
     "Platelet": "P",
-    "Promyelocyte": "Pr",
 }
 
 
@@ -68,11 +68,11 @@ def show_class_reference() -> None:
         "Basophil": "Basophile — rare, granules fonces",
         "Eosinophil": "Eosinophile — granules oranges",
         "Erythroblast": "Erythroblaste [CRITICAL] — precurseur GR",
+        "IG": "Granulocyte immature — precurseur immature",
         "Lymphocyte": "Lymphocyte — petit noyau rond",
         "Monocyte": "Monocyte — grand noyau en fer a cheval",
         "Neutrophil": "Neutrophile — noyau multilobes",
         "Platelet": "Plaquette — tres petite, sans noyau",
-        "Promyelocyte": "Promyelocyte — stade intermediaire",
     }
     for i, (cls, desc) in enumerate(descriptions.items()):
         with cols[i % 4]:
