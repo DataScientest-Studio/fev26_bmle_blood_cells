@@ -95,11 +95,11 @@ p.add_run(".env.example").font.name = "Courier New"
 p.add_run(" et remplir les valeurs).")
 
 # ── ÉTAPE PRÉALABLE ───────────────────────────────────────────────────────────
-doc.add_heading("Étape préalable — Initialisation Supabase (one-shot)", level=2)
-add_warning_box(doc, "À lancer une seule fois avant tous les autres tests. "
-                "Sans cette étape, test_connections.py échoue.")
-doc.add_paragraph("Cette commande crée la table dataset_images dans Supabase "
-                  "(la table predictions existe déjà). Idempotente : sans risque si relancée.")
+doc.add_heading("Étape préalable — Initialisation Supabase (déjà fait ✅)", level=2)
+add_info_box(doc, "Cette étape a déjà été réalisée le 16 juin 2026. "
+             "Les tables 'predictions' et 'dataset_images' existent dans Supabase. "
+             "Ne pas relancer sauf en cas de recréation complète de la base.")
+doc.add_paragraph("Pour mémoire, la commande était :")
 doc.add_heading("Terminal Mac", level=3)
 add_code_block(doc,
     "cd ~/fev26_bmle_blood_cells\n"
