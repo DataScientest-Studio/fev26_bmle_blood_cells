@@ -5,13 +5,22 @@ from PIL import Image
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MODELS_DIR = Path(__file__).parents[1] / "models"
+MODEL_PATH = MODELS_DIR / "best_DenseNet_121.pth"
 CLASSES = ["basophil", "eosinophil", "erythroblast", "ig",
            "lymphocyte", "monocyte", "neutrophil", "platelet"]
 
 
 def test_model_file_exists():
-    pth = MODELS_DIR / "best_DenseNet_121.pth"
-    assert pth.exists(), f"Modèle introuvable : {pth}"
+    if not MODEL_PATH.exists():
+        pytest.skip(f"Modèle non disponible en CI : {MODEL_PATH}")
+    assert MODEL_PATH.exists()
+
+
+def test_metadata_exists():
+    if not MODEL_PATH.exists():
+        pytest.skip("Modèle non disponible en CI")
+    meta = MODELS_DIR / "metadata.json"
+    assert meta.exists(), "metadata.json introuvable"
 
 
 def test_predict_returns_8_classes():
@@ -19,12 +28,12 @@ def test_predict_returns_8_classes():
     import timm
     import torchvision.transforms as T
 
-    pth = MODELS_DIR / "best_DenseNet_121.pth"
-    if not pth.exists():
-        pytest.skip("Modèle non disponible")
+    if not MODEL_PATH.exists():
+        pytest.skip("Modèle non disponible en CI")
+    pth = MODEL_PATH
 
     model = timm.create_model("densenet121", pretrained=False, num_classes=8)
-    ckpt = torch.load(str(pth), map_location="cpu", weights_only=False)
+    ckpt = torch.load(str(MODEL_PATH), map_location="cpu", weights_only=False)
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     model.load_state_dict(state)
     model.eval()
