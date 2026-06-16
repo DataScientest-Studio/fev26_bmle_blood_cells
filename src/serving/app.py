@@ -44,18 +44,18 @@ def predict_with_api(image: Image.Image) -> dict:
         img_bytes = io.BytesIO()
         image.save(img_bytes, format="PNG")
         img_bytes.seek(0)
-        
+
         response = requests.post(
             f"{API_URL}/predict",
             files={"file": ("image.png", img_bytes, "image/png")},
             timeout=30
         )
-        
+
         if response.status_code == 200:
             return response.json()
         else:
             return {"error": f"API error: {response.status_code}", "message": response.text}
-    
+
     except Exception as e:
         return {"error": str(e), "message": "Failed to call API"}
 
@@ -108,7 +108,7 @@ def main() -> None:
     img = Image.open(uploaded).convert("RGB")
 
     col_img, col_results = st.columns([1, 2])
-    
+
     with col_img:
         st.image(img, caption=uploaded.name, use_container_width=True)
         st.caption(f"Taille : {img.size[0]}x{img.size[1]} px")
@@ -128,7 +128,7 @@ def main() -> None:
         is_critical = pred_class in CRITICAL
         icon = "WARN" if is_critical else "OK"
         color = "red" if is_critical else "green"
-        
+
         st.markdown(
             f"### [{icon}] Prediction : "
             f"<span style='color:{color};font-weight:bold'>"
@@ -136,7 +136,7 @@ def main() -> None:
             f"— {confidence*100:.1f}%",
             unsafe_allow_html=True,
         )
-        
+
         if is_critical:
             st.error("Classe critique clinique — verification humaine recommandee.")
 

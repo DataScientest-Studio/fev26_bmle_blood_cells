@@ -3,17 +3,17 @@ Blood Cell — Folder Report
 Analyse un dossier complet : ML SVC + 4 modèles DL (ensemble 5 folds) + Cellpose.
 """
 
+from PIL import Image
+import streamlit as st
+import numpy as np
+import joblib
+import cv2
+from pathlib import Path
+import sys
 import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
-import sys
-from pathlib import Path
 
-import cv2
-import joblib
-import numpy as np
-import streamlit as st
-from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -27,15 +27,15 @@ except Exception:
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 DEFAULT_CROSSVAL_DIR = PROJECT_ROOT / "reports" / "DL_crossval_models"
-ML_BUNDLE_PATH       = PROJECT_ROOT / "reports" / "ML_reports_validation" / "best_ml_model.pkl"
-_ONEDRIVE_CACHE      = PROJECT_ROOT / "reports"
+ML_BUNDLE_PATH = PROJECT_ROOT / "reports" / "ML_reports_validation" / "best_ml_model.pkl"
+_ONEDRIVE_CACHE = PROJECT_ROOT / "reports"
 N_FOLDS = 5
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-IMG_SIZE       = (128, 128)
-IMAGENET_MEAN  = [0.485, 0.456, 0.406]
-IMAGENET_STD   = [0.229, 0.224, 0.225]
-IMAGE_EXTS     = {".jpg", ".jpeg", ".png", ".tiff", ".bmp"}
+IMG_SIZE = (128, 128)
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tiff", ".bmp"}
 
 DL_CLASS_NAMES = [
     "basophil", "eosinophil", "erythroblast", "ig",
@@ -43,20 +43,21 @@ DL_CLASS_NAMES = [
 ]
 DL_VALID_CLASSES = set(DL_CLASS_NAMES)
 DL_MODELS_CFG = {
-    "DenseNet-121":    {"timm_name": "densenet121",        "input_size": 224, "file": "best_DenseNet_121.pth"},
-    "ConvNeXt-Tiny":   {"timm_name": "convnext_tiny",      "input_size": 224, "file": "best_ConvNeXt_Tiny.pth"},
+    "DenseNet-121": {"timm_name": "densenet121", "input_size": 224, "file": "best_DenseNet_121.pth"},
+    "ConvNeXt-Tiny": {"timm_name": "convnext_tiny", "input_size": 224, "file": "best_ConvNeXt_Tiny.pth"},
     "EfficientNet-B3": {"timm_name": "tf_efficientnet_b3", "input_size": 300, "file": "best_EfficientNet_B3.pth"},
-    "ResNet-50":       {"timm_name": "resnet50",            "input_size": 224, "file": "best_ResNet_50.pth"},
+    "ResNet-50": {"timm_name": "resnet50", "input_size": 224, "file": "best_ResNet_50.pth"},
 }
 MODEL_COLORS = {
-    "ML SVC":          "#378ADD",
-    "DenseNet-121":    "#1D9E75",
-    "ConvNeXt-Tiny":   "#7F77DD",
+    "ML SVC": "#378ADD",
+    "DenseNet-121": "#1D9E75",
+    "ConvNeXt-Tiny": "#7F77DD",
     "EfficientNet-B3": "#D85A30",
-    "ResNet-50":       "#888780",
+    "ResNet-50": "#888780",
 }
 
 # ── Model loaders ──────────────────────────────────────────────────────────────
+
 
 @st.cache_resource(show_spinner=False)
 def load_cellpose_cache() -> dict:
@@ -71,7 +72,6 @@ def load_cellpose_cache() -> dict:
         return {r["image_name"]: r for r in results}
     except Exception:
         return {}
-
 
 
 @st.cache_resource
@@ -90,9 +90,10 @@ def load_dl_model(model_key: str, dl_dir: str):
     pth = Path(dl_dir) / DL_MODELS_CFG[model_key]["file"]
     if not pth.exists():
         return None, str(pth)
-    import timm, torch
-    cfg       = DL_MODELS_CFG[model_key]
-    state     = torch.load(pth, map_location="cpu", weights_only=True)
+    import timm
+    import torch
+    cfg = DL_MODELS_CFG[model_key]
+    state = torch.load(pth, map_location="cpu", weights_only=True)
     head_keys = [k for k in state
                  if k.startswith(("classifier", "head", "fc"))
                  and k.endswith(".weight")
@@ -128,8 +129,9 @@ def load_dl_fold_ensemble(model_key: str, crossval_dir: str, n_folds: int = 5):
             missing.append(f"fold {i}")
             continue
         try:
-            import timm, torch
-            ckpt  = torch.load(pth, map_location="cpu", weights_only=False)
+            import timm
+            import torch
+            ckpt = torch.load(pth, map_location="cpu", weights_only=False)
             state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
             head_keys = [k for k in state
                          if k.startswith(("classifier", "head", "fc"))
@@ -150,10 +152,14 @@ def load_dl_fold_ensemble(model_key: str, crossval_dir: str, n_folds: int = 5):
 # ── GradCAM helpers ───────────────────────────────────────────────────────────
 
 def _gradcam_target_layer(model, model_key: str):
-    if "EfficientNet" in model_key: return [model.conv_head]
-    if "ConvNeXt"     in model_key: return [model.stages[-1].blocks[-1].conv_dw]
-    if "DenseNet"     in model_key: return [model.features.denseblock4.denselayer16.conv2]
-    if "ResNet"       in model_key: return [model.layer4[-1].conv3]
+    if "EfficientNet" in model_key:
+        return [model.conv_head]
+    if "ConvNeXt" in model_key:
+        return [model.stages[-1].blocks[-1].conv_dw]
+    if "DenseNet" in model_key:
+        return [model.features.denseblock4.denselayer16.conv2]
+    if "ResNet" in model_key:
+        return [model.layer4[-1].conv3]
     raise ValueError(f"Architecture non reconnue : {model_key}")
 
 
@@ -173,7 +179,7 @@ def compute_gradcam(model, img_path: Path, input_size: int,
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
         img_pil = Image.open(img_path).convert("RGB")
-        tensor  = tf(img_pil).unsqueeze(0)
+        tensor = tf(img_pil).unsqueeze(0)
 
         target_layers = _gradcam_target_layer(model, model_key)
         cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
@@ -195,9 +201,9 @@ def compute_gradcam(model, img_path: Path, input_size: int,
 
 def extract_ml_features(img_path: Path) -> np.ndarray:
     """92 features identiques à l'entraînement SVM : RGB/HSV/LAB mean+std (18) + histos (64) + LBP (10)."""
-    N_BINS   = 16
+    N_BINS = 16
     LBP_BINS = 10
-    img_rgb  = np.array(Image.open(img_path).convert("RGB").resize(IMG_SIZE))
+    img_rgb = np.array(Image.open(img_path).convert("RGB").resize(IMG_SIZE))
     feats: list[float] = list(img_rgb.mean(axis=(0, 1))) + list(img_rgb.std(axis=(0, 1)))
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV).astype(float)
@@ -232,7 +238,6 @@ def predict_dl(models, img_path: Path, input_size: int):
     La proba finale est la moyenne sur tous les folds disponibles.
     """
     from torchvision import transforms
-    import torch
     tf = transforms.Compose([
         transforms.Resize((input_size, input_size),
                           interpolation=transforms.InterpolationMode.BICUBIC),
@@ -243,11 +248,11 @@ def predict_dl(models, img_path: Path, input_size: int):
 
     model_list = models if isinstance(models, list) else [models]
     probas = [_infer_one(m, tensor) for m in model_list]
-    proba  = np.mean(probas, axis=0)   # moyenne des folds
+    proba = np.mean(probas, axis=0)   # moyenne des folds
 
-    n           = len(proba)
+    n = len(proba)
     class_names = DL_CLASS_NAMES[:n]
-    valid_mask  = np.array([c in DL_VALID_CLASSES for c in class_names])
+    valid_mask = np.array([c in DL_VALID_CLASSES for c in class_names])
     proba_valid = proba * valid_mask
     total = proba_valid.sum()
     if total > 0:
@@ -259,12 +264,12 @@ def predict_dl(models, img_path: Path, input_size: int):
 def run_cellpose_for(img_path: Path, class_name: str | None):
     img_bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    item    = {"image": img_rgb.astype(np.float32) / 255.0,
-               "class_name": class_name, "image_name": img_path.name, "path": str(img_path)}
-    r       = morphology_cellpose_v2([item], target_size=(360, 360)).run()[0]
+    item = {"image": img_rgb.astype(np.float32) / 255.0,
+            "class_name": class_name, "image_name": img_path.name, "path": str(img_path)}
+    r = morphology_cellpose_v2([item], target_size=(360, 360)).run()[0]
 
-    vis     = cv2.resize(img_rgb, (360, 360)).copy()
-    mask    = r.get("mask")
+    vis = cv2.resize(img_rgb, (360, 360)).copy()
+    mask = r.get("mask")
     contour = r.get("contour")
     if mask is not None and mask.any():
         green = np.zeros_like(vis)
@@ -381,7 +386,7 @@ def _pick_ml_file(initial_dir: str = "") -> str:
 
 def process_folder(images: list[Path], clf, scaler, dl_models: dict) -> list[dict]:
     rows = []
-    bar  = st.progress(0, text="Initialisation…")
+    bar = st.progress(0, text="Initialisation…")
 
     for i, img_path in enumerate(images):
         bar.progress((i + 1) / len(images), text=f"{img_path.name}  ({i + 1}/{len(images)})")
@@ -390,18 +395,18 @@ def process_folder(images: list[Path], clf, scaler, dl_models: dict) -> list[dic
         # ML SVC
         if clf is not None and scaler is not None:
             try:
-                feats          = extract_ml_features(img_path).reshape(1, -1)
-                feats_sc       = scaler.transform(feats)
+                feats = extract_ml_features(img_path).reshape(1, -1)
+                feats_sc = scaler.transform(feats)
                 raw_pred = clf.predict(feats_sc)[0]
-                proba    = clf.predict_proba(feats_sc)[0]
+                proba = clf.predict_proba(feats_sc)[0]
                 # SVC entraine sur indices entiers -> convertit en nom de classe
                 if isinstance(raw_pred, (int, np.integer, float)):
-                    row["ml_pred"]    = DL_CLASS_NAMES[int(raw_pred)]
+                    row["ml_pred"] = DL_CLASS_NAMES[int(raw_pred)]
                     row["ml_classes"] = DL_CLASS_NAMES
                 else:
-                    row["ml_pred"]    = str(raw_pred)
+                    row["ml_pred"] = str(raw_pred)
                     row["ml_classes"] = list(clf.classes_)
-                row["ml_conf"]  = float(proba.max())
+                row["ml_conf"] = float(proba.max())
                 row["ml_proba"] = proba.tolist()
             except Exception as exc:
                 row["ml_pred"] = f"err: {exc}"
@@ -414,19 +419,19 @@ def process_folder(images: list[Path], clf, scaler, dl_models: dict) -> list[dic
         for key, model in dl_models.items():
             col = key.replace("-", "_").replace(" ", "_")
             if model is None:
-                row[f"{col}_pred"]  = "N/A"
-                row[f"{col}_conf"]  = 0.0
+                row[f"{col}_pred"] = "N/A"
+                row[f"{col}_conf"] = 0.0
                 row[f"{col}_proba"] = None
             else:
                 try:
                     pred, conf, proba, cls_names = predict_dl(model, img_path, DL_MODELS_CFG[key]["input_size"])
-                    row[f"{col}_pred"]       = pred
-                    row[f"{col}_conf"]       = conf
-                    row[f"{col}_proba"]      = proba.tolist()
-                    row[f"{col}_cls_names"]  = cls_names
+                    row[f"{col}_pred"] = pred
+                    row[f"{col}_conf"] = conf
+                    row[f"{col}_proba"] = proba.tolist()
+                    row[f"{col}_cls_names"] = cls_names
                 except Exception as exc:
-                    row[f"{col}_pred"]  = f"err: {exc}"
-                    row[f"{col}_conf"]  = 0.0
+                    row[f"{col}_pred"] = f"err: {exc}"
+                    row[f"{col}_conf"] = 0.0
                     row[f"{col}_proba"] = None
 
         rows.append(row)
@@ -443,9 +448,9 @@ def render_detail(row: dict, dl_models: dict,
     st.subheader(f"Détail — {row['name']}")
 
     img_path = row["path"]
-    orig     = np.array(Image.open(img_path).convert("RGB"))
-    overlay  = None
-    morph    = {}
+    orig = np.array(Image.open(img_path).convert("RGB"))
+    overlay = None
+    morph = {}
     cp_class = None
 
     if use_cellpose and CELLPOSE_AVAILABLE:
@@ -453,7 +458,7 @@ def render_detail(row: dict, dl_models: dict,
         if row.get("ml_pred") not in (None, "N/A") and not str(row["ml_pred"]).startswith("err"):
             candidates.append((row["ml_conf"], row["ml_pred"]))
         for key in dl_models:
-            col  = key.replace("-", "_").replace(" ", "_")
+            col = key.replace("-", "_").replace(" ", "_")
             pred = row.get(f"{col}_pred")
             conf = row.get(f"{col}_conf", 0.0)
             if pred and pred not in ("N/A",) and not str(pred).startswith("err"):
@@ -503,11 +508,11 @@ def render_detail(row: dict, dl_models: dict,
 
     # ── Ligne images ───────────────────────────────────────────────────────────
     show_seg = use_cellpose and CELLPOSE_AVAILABLE
-    show_gc  = gradcam_model_key is not None
+    show_gc = gradcam_model_key is not None
 
     img_cols_n = 1 + int(show_seg) + int(show_gc)
     img_cols = st.columns([2, 1]) if img_cols_n == 1 else st.columns(img_cols_n)
-    col_idx  = 0
+    col_idx = 0
 
     with img_cols[col_idx]:
         st.caption("Image originale")
@@ -519,7 +524,7 @@ def render_detail(row: dict, dl_models: dict,
         with img_cols[col_idx]:
             st.caption(f"Cellpose — classe : **{cp_class or 'auto'}**")
             if overlay is not None:
-                area    = morph.get("area_px")
+                area = morph.get("area_px")
                 caption = f"Aire : {area:.0f} px²" if area else "Aucune cellule détectée"
                 st.image(overlay, caption=caption, use_container_width=True)
             else:
@@ -528,7 +533,7 @@ def render_detail(row: dict, dl_models: dict,
 
     if show_gc:
         with img_cols[col_idx]:
-            col_slug   = gradcam_model_key.replace("-", "_").replace(" ", "_")
+            col_slug = gradcam_model_key.replace("-", "_").replace(" ", "_")
             pred_label = row.get(f"{col_slug}_pred", "?")
             st.caption(f"GradCAM++ — **{gradcam_model_key}** → `{pred_label}`")
             if gradcam_img is not None:
@@ -596,13 +601,13 @@ def render_single_image(source, clf, scaler, dl_models: dict,
                         gradcam_model_key: str | None = None):
     """source : Path (image locale) ou UploadedFile (Streamlit)."""
     import tempfile
-    is_path  = isinstance(source, Path)
-    img      = Image.open(source).convert("RGB")
+    is_path = isinstance(source, Path)
+    img = Image.open(source).convert("RGB")
     img_name = source.name
 
     if is_path:
         tmp_path = source
-        cleanup  = False
+        cleanup = False
     else:
         suffix = Path(source.name).suffix or ".png"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -615,21 +620,21 @@ def render_single_image(source, clf, scaler, dl_models: dict,
         infer_key = f"infer_{tmp_path}"
         if infer_key not in st.session_state:
             all_preds: dict = {}
-            errors:    dict = {}
+            errors: dict = {}
 
             with st.spinner("Analyse en cours…"):
                 if clf is not None and scaler is not None:
                     try:
-                        feats    = extract_ml_features(tmp_path).reshape(1, -1)
+                        feats = extract_ml_features(tmp_path).reshape(1, -1)
                         feats_sc = scaler.transform(feats)
                         raw_pred = clf.predict(feats_sc)[0]
-                        proba    = clf.predict_proba(feats_sc)[0]
+                        proba = clf.predict_proba(feats_sc)[0]
                         if isinstance(raw_pred, (int, np.integer, float)):
                             pred_class = DL_CLASS_NAMES[int(raw_pred)]
-                            classes    = DL_CLASS_NAMES
+                            classes = DL_CLASS_NAMES
                         else:
                             pred_class = str(raw_pred)
-                            classes    = list(clf.classes_)
+                            classes = list(clf.classes_)
                         all_preds["ML SVC"] = {"pred": pred_class, "conf": float(proba.max()),
                                                "proba": proba, "classes": classes}
                     except Exception as exc:
@@ -651,9 +656,9 @@ def render_single_image(source, clf, scaler, dl_models: dict,
         all_preds, errors = st.session_state[infer_key]
 
         # ── Cellpose live ──────────────────────────────────────────────────────
-        orig     = np.array(img)
-        overlay  = None
-        morph    = {}
+        orig = np.array(img)
+        overlay = None
+        morph = {}
         cp_class = None
 
         if use_cellpose and CELLPOSE_AVAILABLE:
@@ -701,12 +706,12 @@ def render_single_image(source, clf, scaler, dl_models: dict,
                 gradcam_err = f"Modèle {gradcam_model_key} non chargé"
 
         # ── Ligne images ──────────────────────────────────────────────────────
-        show_gc  = gradcam_model_key is not None
+        show_gc = gradcam_model_key is not None
         show_seg = use_cellpose and CELLPOSE_AVAILABLE
 
         img_cols_n = 1 + int(show_seg) + int(show_gc)
-        img_cols   = st.columns([2, 1]) if img_cols_n == 1 else st.columns(img_cols_n)
-        col_idx    = 0
+        img_cols = st.columns([2, 1]) if img_cols_n == 1 else st.columns(img_cols_n)
+        col_idx = 0
 
         with img_cols[col_idx]:
             st.caption(f"**{img_name}**")
@@ -718,7 +723,7 @@ def render_single_image(source, clf, scaler, dl_models: dict,
             with img_cols[col_idx]:
                 st.caption(f"Cellpose — classe : **{cp_class or 'auto'}**")
                 if overlay is not None:
-                    area    = morph.get("area_px")
+                    area = morph.get("area_px")
                     caption = f"Aire : {area:.0f} px²" if area else "Aucune cellule détectée"
                     st.image(overlay, caption=caption, use_container_width=True)
                 else:
@@ -743,11 +748,11 @@ def render_single_image(source, clf, scaler, dl_models: dict,
         if not all_preds:
             st.error("Aucun modèle n'a pu produire de prédiction.")
         else:
-            res_cols      = st.columns(5)
+            res_cols = st.columns(5)
             all_model_names = ["ML SVC"] + list(dl_models.keys())
             for i, model_name in enumerate(all_model_names):
                 color = MODEL_COLORS.get(model_name, "#888888")
-                data  = all_preds.get(model_name)
+                data = all_preds.get(model_name)
                 with res_cols[i]:
                     if data:
                         pred, conf = data["pred"], data["conf"]
@@ -811,6 +816,7 @@ else:
     gradcam_model_key = None
 
 mode = st.radio("Mode d'analyse", ["🖼️ Image unique", "📁 Dossier"], horizontal=True)
+
 
 def _clear_infer_cache():
     """Supprime tous les résultats d'inférence mis en cache (infer_*, gradcam_*, results)."""
@@ -876,13 +882,13 @@ crossval_dir = st.session_state.crossval_dir
 
 # ── Load models (once) ─────────────────────────────────────────────────────────
 clf, scaler, ml_classes, ml_err = load_ml_artifacts(st.session_state.ml_bundle_path)
-dl_models   = {}   # key → model ou liste de modèles
+dl_models = {}   # key → model ou liste de modèles
 fold_status = {}   # key → (found_list, missing_list)
 
 for key in DL_MODELS_CFG:
     n = N_FOLDS if use_folds else 1
     models, found, missing = load_dl_fold_ensemble(key, crossval_dir, n)
-    dl_models[key]   = models if models else None
+    dl_models[key] = models if models else None
     fold_status[key] = (found, missing)
 
 # ── Model status indicators ────────────────────────────────────────────────────
@@ -907,7 +913,8 @@ with st.sidebar:
 
 # ── Mode : Image unique ────────────────────────────────────────────────────────
 if "🖼️" in mode:
-    _IMG_DEFAULT_FOLDER = Path("/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches/ImgsDemo")
+    _IMG_DEFAULT_FOLDER = Path(
+        "/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches/ImgsDemo")
 
     if "image_path" not in st.session_state:
         st.session_state["image_path"] = ""
@@ -937,7 +944,7 @@ if "🖼️" in mode:
             for key, models in dl_models.items()
         }
         infer_key = f"infer_{image_path}"
-        cp_key    = f"cp_single_{image_path}"
+        cp_key = f"cp_single_{image_path}"
         gc_key = f"gradcam_{image_path}_{gradcam_model_key}" if gradcam_model_key else None
         needs_compute = (
             infer_key not in st.session_state
@@ -1011,11 +1018,11 @@ else:
         for r in results:
             row_dict = {
                 "Fichier": r["name"],
-                "ML SVC":  fmt(r.get("ml_pred", "N/A"), r.get("ml_conf", 0)),
+                "ML SVC": fmt(r.get("ml_pred", "N/A"), r.get("ml_conf", 0)),
             }
             for key in dl_models:
-                col       = key.replace("-", "_").replace(" ", "_")
-                n_found   = len(fold_status[key][0])
+                col = key.replace("-", "_").replace(" ", "_")
+                n_found = len(fold_status[key][0])
                 col_label = f"{key} ({n_found}f)" if use_folds and n_found > 1 else key
                 row_dict[col_label] = fmt(r.get(f"{col}_pred", "N/A"), r.get(f"{col}_conf", 0))
             table_rows.append(row_dict)
@@ -1033,9 +1040,9 @@ else:
                            "ML_pred": r.get("ml_pred", "N/A"),
                            "ML_conf": round(r.get("ml_conf", 0) * 100, 1)}
                     for key in dl_models:
-                        col_k   = key.replace("-", "_").replace(" ", "_")
+                        col_k = key.replace("-", "_").replace(" ", "_")
                         n_found = len(fold_status[key][0])
-                        label   = f"{key}_{n_found}f" if use_folds and n_found > 1 else key
+                        label = f"{key}_{n_found}f" if use_folds and n_found > 1 else key
                         row[f"{label}_pred"] = r.get(f"{col_k}_pred", "N/A")
                         row[f"{label}_conf"] = round(r.get(f"{col_k}_conf", 0) * 100, 1)
                     rows.append(row)

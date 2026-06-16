@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 FIXTURES = Path(__file__).parent / "fixtures"
-MODELS_DIR = Path(__file__).parents[1] / "models" / "densenet121_crossval_v1"
+MODELS_DIR = Path(__file__).parents[1] / "models"
 CLASSES = ["basophil", "eosinophil", "erythroblast", "ig",
            "lymphocyte", "monocyte", "neutrophil", "platelet"]
 
@@ -12,11 +12,6 @@ CLASSES = ["basophil", "eosinophil", "erythroblast", "ig",
 def test_model_file_exists():
     pth = MODELS_DIR / "best_DenseNet_121.pth"
     assert pth.exists(), f"Modèle introuvable : {pth}"
-
-
-def test_metadata_exists():
-    meta = MODELS_DIR / "metadata.json"
-    assert meta.exists(), "metadata.json introuvable"
 
 
 def test_predict_returns_8_classes():

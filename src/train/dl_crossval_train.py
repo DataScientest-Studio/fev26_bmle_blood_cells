@@ -5,36 +5,31 @@
 # 4 modèles × 5 folds = 20 entraînements
 # Dataset : train_final + val_cropped + test_cropped (Mendeley PBC 17k)
 
+from PIL import Image
+from sklearn.metrics import (
+    roc_auc_score, f1_score, accuracy_score
+)
+from sklearn.model_selection import train_test_split, StratifiedKFold
+import timm
+from torchvision import transforms
+from torch.utils.data import DataLoader, Dataset
+import torch.optim as optim
+import torch.nn as nn
+import torch
+from tqdm import tqdm
+from pathlib import Path
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import mlflow.pytorch
+import mlflow
 import os
 import json
 import random
 import time
 import warnings
 warnings.filterwarnings('ignore')
-
-import mlflow
-import mlflow.pytorch
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pathlib import Path
-from tqdm import tqdm
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-import timm
-
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.metrics import (
-    classification_report, confusion_matrix,
-    roc_auc_score, f1_score, accuracy_score
-)
-from PIL import Image
 
 
 # ─────────────────────────────────────────────
@@ -43,8 +38,8 @@ from PIL import Image
 
 class BloodCellDataset(Dataset):
     def __init__(self, paths, labels, indices, transform=None):
-        self.paths     = [paths[i] for i in indices]
-        self.labels    = [labels[i] for i in indices]
+        self.paths = [paths[i] for i in indices]
+        self.labels = [labels[i] for i in indices]
         self.transform = transform
 
     def __len__(self):
@@ -76,10 +71,10 @@ if __name__ == "__main__":
     print(f"Racine du projet : {PROJECT_ROOT}")
 
     # Dossiers des images améliorées (Cellpose crop + augmentation)
-    _ML_BASE   = Path(r"D:\BloodCellsProject\Mendeley\PBC_dataset_normal_DIB\output")
-    TRAIN_DIR  = _ML_BASE / "train_final"
-    VAL_DIR    = _ML_BASE / "val_cropped"
-    TEST_DIR   = _ML_BASE / "test_cropped"
+    _ML_BASE = Path(r"D:\BloodCellsProject\Mendeley\PBC_dataset_normal_DIB\output")
+    TRAIN_DIR = _ML_BASE / "train_final"
+    VAL_DIR = _ML_BASE / "val_cropped"
+    TEST_DIR = _ML_BASE / "test_cropped"
 
     EXPECTED_CLASSES = [
         "basophil", "eosinophil", "erythroblast", "ig",
@@ -89,34 +84,34 @@ if __name__ == "__main__":
     N_FOLDS = 5
 
     CFG = {
-        "output_dir"  : str(PROJECT_ROOT / "reports" / "Romane_DL_crossval_ameliorees"),
-        "num_epochs"  : 20,
-        "batch_size"  : 32,
-        "lr_head"     : 1e-3,
-        "lr_full"     : 1e-4,
+        "output_dir": str(PROJECT_ROOT / "reports" / "Romane_DL_crossval_ameliorees"),
+        "num_epochs": 20,
+        "batch_size": 32,
+        "lr_head": 1e-3,
+        "lr_full": 1e-4,
         "weight_decay": 1e-4,
-        "patience"    : 3,
-        "num_workers" : 4,
-        "seed"        : 42,
-        "device"      : (
-            "cuda" if torch.cuda.is_available()         else
-            "mps"  if torch.backends.mps.is_available() else
+        "patience": 3,
+        "num_workers": 4,
+        "seed": 42,
+        "device": (
+            "cuda" if torch.cuda.is_available() else
+            "mps" if torch.backends.mps.is_available() else
             "cpu"
         ),
     }
 
     MODELS_CONFIG = {
-        "EfficientNet-B3" : {"name": "tf_efficientnet_b3",  "input_size": 300},
-        "ConvNeXt-Tiny"   : {"name": "convnext_tiny",        "input_size": 224},
-        "DenseNet-121"    : {"name": "densenet121",           "input_size": 224},
-        "ResNet-50"       : {"name": "resnet50",              "input_size": 224},
+        "EfficientNet-B3": {"name": "tf_efficientnet_b3", "input_size": 300},
+        "ConvNeXt-Tiny": {"name": "convnext_tiny", "input_size": 224},
+        "DenseNet-121": {"name": "densenet121", "input_size": 224},
+        "ResNet-50": {"name": "resnet50", "input_size": 224},
     }
 
     MODEL_COLORS = {
-        "EfficientNet-B3" : "#D85A30",
-        "ConvNeXt-Tiny"   : "#7F77DD",
-        "DenseNet-121"    : "#1D9E75",
-        "ResNet-50"       : "#378ADD",
+        "EfficientNet-B3": "#D85A30",
+        "ConvNeXt-Tiny": "#7F77DD",
+        "DenseNet-121": "#1D9E75",
+        "ResNet-50": "#378ADD",
     }
 
     os.makedirs(CFG["output_dir"], exist_ok=True)
@@ -127,7 +122,7 @@ if __name__ == "__main__":
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark     = False
+        torch.backends.cudnn.benchmark = False
 
     set_seed(CFG["seed"])
 
@@ -153,10 +148,10 @@ if __name__ == "__main__":
 
     print("\nChargement des datasets...")
     paths_train, labels_train = load_dataset_paths(TRAIN_DIR, CLASS_NAMES)
-    paths_val,   labels_val   = load_dataset_paths(VAL_DIR,   CLASS_NAMES)
-    paths_test,  labels_test  = load_dataset_paths(TEST_DIR,  CLASS_NAMES)
+    paths_val, labels_val = load_dataset_paths(VAL_DIR, CLASS_NAMES)
+    paths_test, labels_test = load_dataset_paths(TEST_DIR, CLASS_NAMES)
 
-    all_paths  = paths_train + paths_val + paths_test
+    all_paths = paths_train + paths_val + paths_test
     all_labels = labels_train + labels_val + labels_test
 
     print(f"  train_final  : {len(paths_train)} images")
@@ -183,7 +178,7 @@ if __name__ == "__main__":
     # ─────────────────────────────────────────────
 
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
-    IMAGENET_STD  = [0.229, 0.224, 0.225]
+    IMAGENET_STD = [0.229, 0.224, 0.225]
 
     def get_transform(input_size):
         return transforms.Compose([
@@ -194,7 +189,7 @@ if __name__ == "__main__":
         ])
 
     def get_dataloaders_fold(input_size, idx_train, idx_val, idx_test):
-        tf  = get_transform(input_size)
+        tf = get_transform(input_size)
         pin = (CFG["device"] == "cuda")
 
         def _make(idx, shuffle):
@@ -236,12 +231,12 @@ if __name__ == "__main__":
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device, enabled=use_amp):
                 outputs = model(imgs)
-                loss    = criterion(outputs, labels)
+                loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             running_loss += loss.item() * imgs.size(0)
-            correct      += (outputs.argmax(1) == labels).sum().item()
-            total        += imgs.size(0)
+            correct += (outputs.argmax(1) == labels).sum().item()
+            total += imgs.size(0)
         return running_loss / total, correct / total
 
     @torch.no_grad()
@@ -252,10 +247,10 @@ if __name__ == "__main__":
             imgs, labels = imgs.to(device), labels.to(device)
             with torch.autocast(device_type=device, enabled=use_amp):
                 outputs = model(imgs)
-                loss    = criterion(outputs, labels)
+                loss = criterion(outputs, labels)
             running_loss += loss.item() * imgs.size(0)
-            correct      += (outputs.argmax(1) == labels).sum().item()
-            total        += imgs.size(0)
+            correct += (outputs.argmax(1) == labels).sum().item()
+            total += imgs.size(0)
         return running_loss / total, correct / total
 
     @torch.no_grad()
@@ -265,8 +260,8 @@ if __name__ == "__main__":
         for imgs, labels in tqdm(loader, leave=False, desc="  Inference"):
             imgs = imgs.to(device)
             logits = model(imgs).float()
-            probs  = torch.softmax(logits, dim=1).cpu().numpy()
-            preds  = probs.argmax(axis=1)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
+            preds = probs.argmax(axis=1)
             y_true.extend(labels.numpy())
             y_pred.extend(preds)
             y_scores.extend(probs)
@@ -274,7 +269,7 @@ if __name__ == "__main__":
 
     def train_model_fold(model_key, fold_num, fold_dir, idx_train, idx_val):
         """Entraîne un modèle pour un fold donné — 2 phases + early stopping."""
-        safe_key  = model_key.replace("-", "_")
+        safe_key = model_key.replace("-", "_")
         save_path = fold_dir / f"best_fold{fold_num}_{safe_key}.pth"
         hist_path = fold_dir / f"history_fold{fold_num}_{safe_key}.json"
         ckpt_path = fold_dir / f"ckpt_fold{fold_num}_{safe_key}.pth"
@@ -294,8 +289,8 @@ if __name__ == "__main__":
         print(f"  {'='*50}")
         set_seed(CFG["seed"] + fold_num * 100)
 
-        cfg_m   = MODELS_CONFIG[model_key]
-        device  = CFG["device"]
+        cfg_m = MODELS_CONFIG[model_key]
+        device = CFG["device"]
         use_amp = device in ("cuda", "mps")
 
         train_loader, val_loader, _ = get_dataloaders_fold(
@@ -305,15 +300,15 @@ if __name__ == "__main__":
         model = build_model(model_key, NUM_CLASSES, pretrained=True).to(device)
 
         train_labels_list = [all_labels[i] for i in idx_train]
-        cls_counts  = np.bincount(train_labels_list, minlength=NUM_CLASSES).astype(float)
+        cls_counts = np.bincount(train_labels_list, minlength=NUM_CLASSES).astype(float)
         cls_weights = 1.0 / np.where(cls_counts > 0, cls_counts, 1.0)
         cls_weights = torch.tensor(
             cls_weights / cls_weights.sum() * NUM_CLASSES, dtype=torch.float
         ).to(device)
         criterion = nn.CrossEntropyLoss(weight=cls_weights)
 
-        history          = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
-        best_val_acc     = 0.0
+        history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
+        best_val_acc = 0.0
         patience_counter = 0
 
         resume_phase, resume_epoch = 1, 0
@@ -323,13 +318,13 @@ if __name__ == "__main__":
             try:
                 ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
                 model.load_state_dict(ckpt["model"])
-                history           = ckpt["history"]
-                best_val_acc      = ckpt["best_val_acc"]
-                patience_counter  = ckpt["patience_counter"]
-                resume_phase      = ckpt["phase"]
-                resume_epoch      = ckpt["epoch"] + 1
-                ckpt_opt_state    = ckpt["optimizer"]
-                ckpt_sched_state  = ckpt["scheduler"]
+                history = ckpt["history"]
+                best_val_acc = ckpt["best_val_acc"]
+                patience_counter = ckpt["patience_counter"]
+                resume_phase = ckpt["phase"]
+                resume_epoch = ckpt["epoch"] + 1
+                ckpt_opt_state = ckpt["optimizer"]
+                ckpt_sched_state = ckpt["scheduler"]
                 print(f"  Reprise checkpoint — Phase {resume_phase}, epoch {resume_epoch + 1}")
             except Exception as e:
                 print(f"  Checkpoint corrompu ({e}) — réentraînement depuis zéro")
@@ -344,7 +339,7 @@ if __name__ == "__main__":
             }, ckpt_path)
 
         PHASE1_EPOCHS = 5
-        remaining     = CFG["num_epochs"] - PHASE1_EPOCHS
+        remaining = CFG["num_epochs"] - PHASE1_EPOCHS
 
         mlflow.set_tracking_uri("mlruns")
         mlflow.set_experiment("blood_cell_crossval_ameliorees")
@@ -413,7 +408,7 @@ if __name__ == "__main__":
                 history["val_acc"].append(vl_acc)
 
                 if vl_acc > best_val_acc:
-                    best_val_acc     = vl_acc
+                    best_val_acc = vl_acc
                     patience_counter = 0
                     torch.save(model.state_dict(), save_path)
                 else:
@@ -444,7 +439,7 @@ if __name__ == "__main__":
             model.eval()
             print(f"  Best val acc : {best_val_acc:.4f}")
             mlflow.log_metric("best_val_acc", best_val_acc)
-            mlflow.log_metric("final_epoch",  len(history["val_acc"]))
+            mlflow.log_metric("final_epoch", len(history["val_acc"]))
 
         finally:
             mlflow.end_run()
@@ -466,7 +461,7 @@ if __name__ == "__main__":
         fold_dir.mkdir(exist_ok=True)
 
         idx_trainval = idx_trainval_arr.tolist()
-        idx_test     = idx_test_arr.tolist()
+        idx_test = idx_test_arr.tolist()
 
         # Split trainval → train (85%) + val (15%)
         labels_trainval = [all_labels[i] for i in idx_trainval]
@@ -475,7 +470,7 @@ if __name__ == "__main__":
             idx_tv_arr, test_size=0.15, stratify=labels_trainval, random_state=CFG["seed"]
         )
         idx_train = [idx_trainval[i] for i in idx_tr_rel]
-        idx_val   = [idx_trainval[i] for i in idx_vl_rel]
+        idx_val = [idx_trainval[i] for i in idx_vl_rel]
 
         print(f"\n{'#'*60}")
         print(f"  FOLD {fold_num}/{N_FOLDS}")
@@ -492,9 +487,9 @@ if __name__ == "__main__":
             _, _, test_loader = get_dataloaders_fold(cfg_m["input_size"], [], [], idx_test)
             y_true, y_pred, y_scores = get_predictions(model, test_loader, CFG["device"])
 
-            acc      = accuracy_score(y_true, y_pred)
+            acc = accuracy_score(y_true, y_pred)
             macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
-            wt_f1    = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+            wt_f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0)
 
             y_true_1d = y_true.ravel()
             try:
@@ -503,16 +498,16 @@ if __name__ == "__main__":
                 auc = float("nan")
 
             all_fold_results.append({
-                "fold"       : fold_num,
-                "model"      : model_key,
-                "accuracy"   : acc,
-                "macro_f1"   : macro_f1,
+                "fold": fold_num,
+                "model": model_key,
+                "accuracy": acc,
+                "macro_f1": macro_f1,
                 "weighted_f1": wt_f1,
-                "auc_roc"    : auc,
-                "n_train"    : len(idx_train),
-                "n_val"      : len(idx_val),
-                "n_test"     : len(idx_test),
-                "epochs"     : len(history["val_acc"]),
+                "auc_roc": auc,
+                "n_train": len(idx_train),
+                "n_val": len(idx_val),
+                "n_test": len(idx_test),
+                "epochs": len(history["val_acc"]),
                 "elapsed_min": (time.time() - t_run_start) / 60,
             })
 
@@ -543,7 +538,7 @@ if __name__ == "__main__":
         row = {"model": model_key}
         for col in metrics_cols:
             row[f"{col}_mean"] = sub[col].mean()
-            row[f"{col}_std"]  = sub[col].std()
+            row[f"{col}_std"] = sub[col].std()
         summary_rows.append(row)
 
     df_summary = pd.DataFrame(summary_rows).set_index("model")

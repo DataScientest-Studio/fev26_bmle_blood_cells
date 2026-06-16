@@ -11,8 +11,6 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-import numpy as np
 from PIL import Image
 import io
 from torchvision import transforms
@@ -72,47 +70,49 @@ transform = transforms.Compose([
     )
 ])
 
+
 def load_model():
     """Charge le modèle DenseNet-121 une seule fois"""
     global model, model_device
-    
+
     if model is not None:
         return model
-    
+
     # Chemins où chercher le modèle (en ordre de priorité)
     model_paths = [
         "models/best_DenseNet_121.pth",
         "/app/models/best_DenseNet_121.pth",
         "reports/pour_mac/best_DenseNet_121.pth",
     ]
-    
+
     model_path = None
     for path in model_paths:
         if os.path.exists(path):
             model_path = path
             print(f"Model found at: {model_path}")
             break
-    
+
     if model_path is None:
         raise FileNotFoundError(
             f"Model not found. Searched in: {', '.join(model_paths)}"
         )
-    
+
     # Charger le modèle
     model = densenet121(pretrained=False)
     model.classifier = nn.Linear(model.classifier.in_features, NUM_CLASSES)
-    
+
     checkpoint = torch.load(model_path, map_location=DEVICE)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
     else:
         model.load_state_dict(checkpoint)
-    
+
     model = model.to(DEVICE)
     model.eval()
     model_device = DEVICE
-    
+
     return model
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -123,10 +123,12 @@ async def startup_event():
     except Exception as e:
         print(f"Warning: Could not load model at startup: {e}")
 
+
 @app.get("/health")
 async def health():
     """Vérifier que l'API est accessible"""
     return {"status": "ok"}
+
 
 @app.get("/")
 async def root():
@@ -138,11 +140,12 @@ async def root():
         "classes": CLASSES
     }
 
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     """
     Prédiction DL sur une image uploadée.
-    
+
     Returns:
     {
         "class": "Lymphocyte",
@@ -157,44 +160,46 @@ async def predict(file: UploadFile = File(...)):
     try:
         # Charger le modèle si nécessaire
         model = load_model()
-        
+
         # Lire l'image
         image_data = await file.read()
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        
+
         # Prétraiter
         image_tensor = transform(image).unsqueeze(0).to(DEVICE)
-        
+
         # Prédire
         with torch.no_grad():
             outputs = model(image_tensor)
             probs = torch.softmax(outputs, dim=1)
             confidence, pred_class = torch.max(probs, 1)
-        
+
         # Préparer la réponse
         pred_idx = pred_class.item()
         pred_label = CLASSES[pred_idx]
         pred_confidence = confidence.item()
-        
+
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
-        
+
         return {
             "class": pred_label,
             "confidence": round(pred_confidence, 3),
             "all_probas": all_probas
         }
-    
+
     except Exception as e:
         return {
             "error": str(e),
             "message": "Prédiction échouée"
         }
 
+
 @app.get("/classes")
 async def get_classes():
     """Retourner les 8 classes de cellules"""
     return {"classes": CLASSES, "num_classes": NUM_CLASSES}
+
 
 @app.get("/model-info")
 async def model_info():
