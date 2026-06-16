@@ -5,6 +5,7 @@ CellImagesSource1/
 CellImagesSource/
 src/independent_scripts/outputs/
 outputs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -12,8 +13,6 @@ __pycache__/
 
 # C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -33,8 +32,6 @@ wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -96,6 +93,8 @@ celerybeat-schedule
 
 # Environments
 .env
+.env.local
+.env\ 2
 .venv
 env/
 venv/
@@ -125,11 +124,19 @@ dmypy.json
 .vscode/
 !.vscode/launch.json
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 .claude/
+
+# DVC
+.dvc/tmp/
+!.dvc/
+!*.dvc
 
 # DL pipeline — fichiers lourds générés
 reports/**/*.pth
@@ -173,11 +180,9 @@ catboost_info/
 
 # Nouveaux dossiers — données et modèles lourds
 data/raw/
+data/processed/
 data/interim/
 models/**/*.pth
-
-# Variables d'environnement locales
-.env
 
 # Fichiers temporaires de génération
 generate_reorganisation_doc.py

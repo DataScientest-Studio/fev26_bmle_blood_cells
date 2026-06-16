@@ -1,5 +1,5 @@
 # Image de base Python — compatible avec torch, timm, cellpose
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Métadonnées
 LABEL maintainer="fev26_bmle_blood_cells"
@@ -21,11 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender-dev \
     libgomp1 \
     git \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier et installer les dépendances Python
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY requirements-streamlit.txt .
+RUN pip install --upgrade pip && pip install -r requirements-streamlit.txt
 
 # Copier le code source
 COPY configs/ ./configs/
