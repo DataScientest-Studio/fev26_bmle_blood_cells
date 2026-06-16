@@ -1,6 +1,9 @@
 #Dossiers à ignorer
-data/
+/data/*
 !src/data/
+!/data/runs/
+/data/runs/run*/*
+!/data/runs/*.dvc
 CellImagesSource1/
 CellImagesSource/
 src/independent_scripts/outputs/
