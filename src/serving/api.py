@@ -6,6 +6,7 @@ Lancement :
     uvicorn src.serving.api:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import io
 import os
 import sys
 import torch
@@ -15,9 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
-import numpy as np
 from PIL import Image
-import io
 from torchvision import transforms
 from torchvision.models import densenet121
 
@@ -54,9 +53,9 @@ app = FastAPI(
     description="API de classification de cellules sanguines — DenseNet-121 (8 classes)",
     version="1.0.0",
     openapi_tags=[
-        {"name": "Inférence",  "description": "Prédiction sur une image de cellule sanguine"},
+        {"name": "Inférence",    "description": "Prédiction sur une image de cellule sanguine"},
         {"name": "Entraînement", "description": "Lancement et suivi de l'entraînement du modèle"},
-        {"name": "Info",       "description": "État de l'API et informations sur le modèle"},
+        {"name": "Info",         "description": "État de l'API et informations sur le modèle"},
     ],
 )
 
@@ -83,13 +82,14 @@ transform = transforms.Compose([
     )
 ])
 
+
 def load_model():
     """Charge le modèle DenseNet-121 une seule fois"""
     global model, model_device
-    
+
     if model is not None:
         return model
-    
+
     # Chemins où chercher le modèle (en ordre de priorité)
     model_paths = [
         "models/best_densenet121.pth",       # modèle entraîné via training.py (8 classes)
@@ -117,7 +117,10 @@ def load_model():
     num_classes_ckpt = state_dict["classifier.weight"].shape[0]
 
     if num_classes_ckpt != NUM_CLASSES:
-        print(f"Warning: checkpoint has {num_classes_ckpt} classes, CLASSES list has {NUM_CLASSES} — using checkpoint size")
+        print(
+            f"Warning: checkpoint has {num_classes_ckpt} classes, "
+            f"CLASSES list has {NUM_CLASSES} — using checkpoint size"
+        )
 
     model = densenet121(weights=None)
     model.classifier = nn.Linear(model.classifier.in_features, num_classes_ckpt)
@@ -125,8 +128,9 @@ def load_model():
     model = model.to(DEVICE)
     model.eval()
     model_device = DEVICE
-    
+
     return model
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -137,10 +141,12 @@ async def startup_event():
     except Exception as e:
         print(f"Warning: Could not load model at startup: {e}")
 
+
 @app.get("/health", tags=["Info"])
 async def health():
     """Vérifier que l'API est accessible."""
     return {"status": "ok"}
+
 
 @app.get("/", tags=["Info"])
 async def root():
@@ -152,11 +158,12 @@ async def root():
         "classes": CLASSES,
     }
 
+
 @app.post("/predict", tags=["Inférence"])
 async def predict(file: UploadFile = File(...)):
     """
     Prédiction DL sur une image uploadée.
-    
+
     Returns:
     {
         "class": "Lymphocyte",
@@ -171,44 +178,46 @@ async def predict(file: UploadFile = File(...)):
     try:
         # Charger le modèle si nécessaire
         model = load_model()
-        
+
         # Lire l'image
         image_data = await file.read()
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        
+
         # Prétraiter
         image_tensor = transform(image).unsqueeze(0).to(DEVICE)
-        
+
         # Prédire
         with torch.no_grad():
             outputs = model(image_tensor)
             probs = torch.softmax(outputs, dim=1)
             confidence, pred_class = torch.max(probs, 1)
-        
+
         # Préparer la réponse
         pred_idx = pred_class.item()
         pred_label = CLASSES[pred_idx]
         pred_confidence = confidence.item()
-        
+
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
-        
+
         return {
             "class": pred_label,
             "confidence": round(pred_confidence, 3),
             "all_probas": all_probas
         }
-    
+
     except Exception as e:
         return {
             "error": str(e),
             "message": "Prédiction échouée"
         }
 
+
 @app.get("/classes", tags=["Info"])
 async def get_classes():
     """Retourner les 8 classes de cellules sanguines."""
     return {"classes": CLASSES, "num_classes": NUM_CLASSES}
+
 
 @app.get("/model-info", tags=["Info"])
 async def model_info():
@@ -219,6 +228,7 @@ async def model_info():
         "device": str(DEVICE),
         "classes": CLASSES,
     }
+
 
 class TrainingParams(BaseModel):
     data_dir: Optional[str] = None
@@ -244,8 +254,14 @@ async def run_training(params: TrainingParams = TrainingParams()):
     try:
         from src.train.training import train, DEFAULT_CFG
 
-        data_dir = Path(params.data_dir) if params.data_dir else ROOT / os.getenv("DATA_RAW_DIR", "data/raw")
-        output_dir = Path(params.output_dir) if params.output_dir else ROOT / os.getenv("MODELS_DIR", "models")
+        data_dir = (
+            Path(params.data_dir) if params.data_dir
+            else ROOT / os.getenv("DATA_RAW_DIR", "data/raw")
+        )
+        output_dir = (
+            Path(params.output_dir) if params.output_dir
+            else ROOT / os.getenv("MODELS_DIR", "models")
+        )
 
         cfg = {
             **DEFAULT_CFG,

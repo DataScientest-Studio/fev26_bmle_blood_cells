@@ -14,8 +14,6 @@ import time
 import warnings
 from pathlib import Path
 
-warnings.filterwarnings("ignore")
-
 import mlflow
 import mlflow.pytorch
 import numpy as np
@@ -29,6 +27,8 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+
+warnings.filterwarnings("ignore")
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
@@ -206,10 +206,13 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
     print(f"Split   : train={len(idx_train)}  val={len(idx_val)}  test={len(idx_test)}")
 
     tf = get_transform(cfg["input_size"])
-    make_dl = lambda idxs, shuffle: DataLoader(
-        CellDataset([paths[i] for i in idxs], [labels[i] for i in idxs], tf),
-        batch_size=cfg["batch_size"], shuffle=shuffle, num_workers=cfg["num_workers"],
-    )
+
+    def make_dl(idxs, shuffle):
+        return DataLoader(
+            CellDataset([paths[i] for i in idxs], [labels[i] for i in idxs], tf),
+            batch_size=cfg["batch_size"], shuffle=shuffle, num_workers=cfg["num_workers"],
+        )
+
     train_dl = make_dl(idx_train, shuffle=True)
     val_dl   = make_dl(idx_val,   shuffle=False)
     test_dl  = make_dl(idx_test,  shuffle=False)
