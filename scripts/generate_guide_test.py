@@ -88,11 +88,33 @@ doc.add_paragraph()
 
 # ── Prérequis ─────────────────────────────────────────────────────────────────
 doc.add_heading("Prérequis", level=2)
-p = doc.add_paragraph("Avoir un fichier ")
-p.add_run(".env").font.name = "Courier New"
-p.add_run(" à la racine du projet (copier ")
+
+doc.add_paragraph("Prérequis 1 — Se placer dans le projet et activer l'environnement virtuel").runs[0].bold = True
+doc.add_heading("Mac", level=3)
+add_code_block(doc,
+    "cd ~/fev26_bmle_blood_cells\n"
+    "source .venv/bin/activate"
+)
+doc.add_heading("Windows (PowerShell)", level=3)
+add_code_block(doc,
+    "cd \"$env:USERPROFILE\\fev26_bmle_blood_cells\"\n"
+    ".venv\\Scripts\\Activate.ps1"
+)
+
+doc.add_paragraph("Prérequis 2 — Fichier .env configuré").runs[0].bold = True
+p = doc.add_paragraph("Copier ")
 p.add_run(".env.example").font.name = "Courier New"
-p.add_run(" et remplir les valeurs).")
+p.add_run(" en ")
+p.add_run(".env").font.name = "Courier New"
+p.add_run(" et remplir les valeurs — en particulier ")
+r = p.add_run("SUPABASE_PASSWORD")
+r.font.name = "Courier New"
+r.bold = True
+p.add_run(" et ")
+r2 = p.add_run("DAGSHUB_TOKEN")
+r2.font.name = "Courier New"
+r2.bold = True
+p.add_run(".")
 
 # ── ÉTAPE PRÉALABLE ───────────────────────────────────────────────────────────
 doc.add_heading("Étape préalable — Initialisation Supabase (déjà fait ✅)", level=2)

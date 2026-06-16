@@ -76,7 +76,7 @@ def test_supabase() -> bool:
         # Lecture pour vérifier
         cur.execute("SELECT image_name, predicted_class, confidence FROM predictions WHERE id = %s", (row_id,))
         row = cur.fetchone()
-        _ok(f"Lecture OK → {row}")
+        _ok(f"Lecture OK -> {row}")
 
         # Nettoyage de la ligne de test
         cur.execute("DELETE FROM predictions WHERE id = %s", (row_id,))
@@ -101,46 +101,49 @@ def test_supabase() -> bool:
 # ─────────────────────────────────────────────
 
 def test_dagshub() -> bool:
-    print("\n[2/2] DagsHub (datalake images + modèles)")
+    print("\n[2/2] DagsHub (datalake images + modeles)")
     try:
         import requests
+        import urllib3
         import yaml
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
-        _err("requests ou pyyaml non installé")
+        _err("requests ou pyyaml non installe")
         return FAIL
 
     user = os.getenv("DAGSHUB_USER", "")
     token = os.getenv("DAGSHUB_TOKEN", "")
+    repo_owner = os.getenv("DAGSHUB_REPO_OWNER", "Dumegan")
     repo = os.getenv("DAGSHUB_REPO", "Bloodcells-project")
 
     if not user or not token:
         _err("DAGSHUB_USER et DAGSHUB_TOKEN manquants dans .env")
         return FAIL
 
-    base = f"https://dagshub.com/{user}/{repo}"
+    base = f"https://dagshub.com/{repo_owner}/{repo}"
     auth = (user, token)
 
     # Vérification manifest DVC modèle
     try:
-        r = requests.get(f"{base}/raw/main/Models.dvc", auth=auth, timeout=10)
+        r = requests.get(f"{base}/raw/main/Models.dvc", auth=auth, timeout=10, verify=False)
         r.raise_for_status()
         manifest = yaml.safe_load(r.text)
         md5 = manifest["outs"][0]["md5"]
         size_mb = manifest["outs"][0].get("size", 0) / 1024 / 1024
-        _ok(f"Manifest Models.dvc OK (md5={md5[:8]}…, taille≈{size_mb:.1f} MB)")
+        _ok(f"Manifest Models.dvc OK (md5={md5[:8]}..., taille~{size_mb:.1f} MB)")
     except Exception as exc:
-        _err(f"Manifest Models.dvc échoué : {exc}")
+        _err(f"Manifest Models.dvc echoue : {exc}")
         return FAIL
 
     # Vérification manifest DVC images
     try:
-        r = requests.get(f"{base}/raw/main/Source_100.dvc", auth=auth, timeout=10)
+        r = requests.get(f"{base}/raw/main/Source_100.dvc", auth=auth, timeout=10, verify=False)
         r.raise_for_status()
         manifest = yaml.safe_load(r.text)
         md5 = manifest["outs"][0]["md5"]
-        _ok(f"Manifest Source_100.dvc OK (md5={md5[:8]}…)")
+        _ok(f"Manifest Source_100.dvc OK (md5={md5[:8]}...)")
     except Exception as exc:
-        _err(f"Manifest Source_100.dvc échoué : {exc}")
+        _err(f"Manifest Source_100.dvc echoue : {exc}")
         return FAIL
 
     return PASS
