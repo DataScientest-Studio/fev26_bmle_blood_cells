@@ -94,8 +94,65 @@ p.add_run(" à la racine du projet (copier ")
 p.add_run(".env.example").font.name = "Courier New"
 p.add_run(" et remplir les valeurs).")
 
+# ── ÉTAPE PRÉALABLE ───────────────────────────────────────────────────────────
+doc.add_heading("Étape préalable — Initialisation Supabase (one-shot)", level=2)
+add_warning_box(doc, "À lancer une seule fois avant tous les autres tests. "
+                "Sans cette étape, test_connections.py échoue.")
+doc.add_paragraph("Cette commande crée la table dataset_images dans Supabase "
+                  "(la table predictions existe déjà). Idempotente : sans risque si relancée.")
+doc.add_heading("Terminal Mac", level=3)
+add_code_block(doc,
+    "cd ~/fev26_bmle_blood_cells\n"
+    "source .venv/bin/activate\n"
+    "python scripts/init_db.py"
+)
+doc.add_heading("Terminal Windows (PowerShell)", level=3)
+add_code_block(doc,
+    "cd \"$env:USERPROFILE\\fev26_bmle_blood_cells\"\n"
+    ".venv\\Scripts\\Activate.ps1\n"
+    "python scripts/init_db.py"
+)
+doc.add_paragraph("Résultat attendu :").runs[0].bold = True
+add_code_block(doc,
+    "Connexion à Supabase...\n"
+    "  [OK] Connexion établie\n\n"
+    "Création des tables...\n"
+    "  [OK] Tables 'predictions' et 'dataset_images' créées (ou déjà existantes)\n\n"
+    "Terminé."
+)
+
 # ── TEST 1 ────────────────────────────────────────────────────────────────────
-doc.add_heading("Test 1 — Connexion DagsHub", level=2)
+doc.add_heading("Test 1 — Connexions infrastructure (Supabase + DagsHub)", level=2)
+add_info_box(doc, "Ce test vérifie les deux connexions infrastructure en une seule commande.")
+doc.add_heading("Terminal Mac", level=3)
+add_code_block(doc,
+    "python scripts/test_connections.py"
+)
+doc.add_heading("Terminal Windows (PowerShell)", level=3)
+add_code_block(doc,
+    "python scripts/test_connections.py"
+)
+doc.add_paragraph("Résultat attendu :").runs[0].bold = True
+add_code_block(doc,
+    "==================================================\n"
+    "  Test des connexions infrastructure\n"
+    "==================================================\n\n"
+    "[1/2] Supabase (PostgreSQL)\n"
+    "  [OK] Connexion établie\n"
+    "  [OK] Insertion OK (id=...)\n"
+    "  [OK] Lecture OK → ('test_connection.jpg', 'neutrophil', 0.99)\n"
+    "  [OK] Nettoyage de la ligne de test OK\n\n"
+    "[2/2] DagsHub (datalake images + modèles)\n"
+    "  [OK] Manifest Models.dvc OK (md5=xxxxxxxx...)\n"
+    "  [OK] Manifest Source_100.dvc OK (md5=xxxxxxxx...)\n\n"
+    "==================================================\n"
+    "  Supabase     OK\n"
+    "  DagsHub      OK\n"
+    "=================================================="
+)
+
+# ── TEST 2 ────────────────────────────────────────────────────────────────────
+doc.add_heading("Test 2 — Connexion DagsHub (téléchargement)", level=2)
 doc.add_heading("VSCode (Windows & Mac)", level=3)
 for step in [
     "Ouvrir Run & Debug (Ctrl+Shift+D / Cmd+Shift+D)",
@@ -116,8 +173,8 @@ add_code_block(doc,
     "Connexion DagsHub OK"
 )
 
-# ── TEST 2 ────────────────────────────────────────────────────────────────────
-doc.add_heading("Test 2 — Entraînement (training.py sans API)", level=2)
+# ── TEST 3 ────────────────────────────────────────────────────────────────────
+doc.add_heading("Test 3 — Entraînement (training.py sans API)", level=2)
 doc.add_heading("VSCode (Windows & Mac)", level=3)
 for step in [
     'Run & Debug → sélectionner "Test training (Source_100 - 1 epoch)"',
@@ -147,7 +204,7 @@ add_info_box(doc, "Avec 100 images et 1 epoch, les métriques seront faibles (~0
 
 doc.add_heading("Terminal Mac", level=3)
 add_code_block(doc,
-    "cd /chemin/vers/fev26_bmle_blood_cells\n"
+    "cd ~/fev26_bmle_blood_cells\n"
     "source .venv/bin/activate\n"
     "python -m src.train.training \\\n"
     "  --data-dir data/Source_100 --output-dir models \\\n"
@@ -155,15 +212,15 @@ add_code_block(doc,
 )
 doc.add_heading("Terminal Windows (PowerShell)", level=3)
 add_code_block(doc,
-    "cd C:\\Users\\<votre-nom>\\fev26_bmle_blood_cells\n"
+    "cd \"$env:USERPROFILE\\fev26_bmle_blood_cells\"\n"
     ".venv\\Scripts\\Activate.ps1\n"
     "python -m src.train.training `\n"
     "  --data-dir data/Source_100 --output-dir models `\n"
     "  --epochs-head 1 --epochs-full 1 --batch-size 8"
 )
 
-# ── TEST 3 ────────────────────────────────────────────────────────────────────
-doc.add_heading("Test 3 — Prédiction (predict_model.py sans API)", level=2)
+# ── TEST 4 ────────────────────────────────────────────────────────────────────
+doc.add_heading("Test 4 — Prédiction (predict_model.py sans API)", level=2)
 add_warning_box(doc, "Nécessite que le Test 2 ait été lancé une fois (génère models/best_densenet121.pth).")
 add_info_box(doc, "Avec le modèle test rapide (1 epoch), la prédiction peut être incorrecte — c'est attendu.")
 
@@ -196,8 +253,8 @@ add_code_block(doc,
     "  --model models/best_densenet121.pth"
 )
 
-# ── TEST 4 ────────────────────────────────────────────────────────────────────
-doc.add_heading("Test 4 — API FastAPI complète", level=2)
+# ── TEST 5 ────────────────────────────────────────────────────────────────────
+doc.add_heading("Test 5 — API FastAPI complète", level=2)
 doc.add_heading("Étape 4.1 — Démarrer le serveur", level=3)
 doc.add_paragraph("VSCode (Windows & Mac) :").runs[0].bold = True
 for step in [
@@ -260,7 +317,9 @@ add_code_block(doc,
 # ── TABLEAU RÉCAP ─────────────────────────────────────────────────────────────
 doc.add_heading("Récapitulatif des tests Phase 1", level=2)
 recap_rows = [
-    ("DagsHub",         '"Test DagsHub connection"',              "Connexion DagsHub OK"),
+    ("init_db.py",      "python scripts/init_db.py",              "Tables 'predictions' et 'dataset_images' créées (ou déjà existantes)"),
+    ("Connexions",      "python scripts/test_connections.py",      "Supabase OK + DagsHub OK"),
+    ("DagsHub DL",      '"Test DagsHub connection" (VSCode)',      "Connexion DagsHub OK + modèle présent"),
     ("training.py",     '"Test training (Source_100 - 1 epoch)"', "Résumé : val_acc=... + MLflow run ID affichés"),
     ("predict_model.py",'"Test predict_model (une image)"',       "Classe + confiance affichés"),
     ("API démarrage",   '"Lancer API FastAPI"',                   "Application startup complete sans erreur"),
