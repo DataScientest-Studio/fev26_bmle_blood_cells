@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import datetime
 
-OUTPUT = Path(__file__).parents[1] / "reports" / "Guide_Test_Phases1_2.docx"
+OUTPUT = Path(__file__).parents[1] / "reports" / "Sara" / "Guide_Test_Phases1_2.docx"
 
 
 def set_cell_bg(cell, hex_color: str):
@@ -408,7 +408,7 @@ doc.add_heading("Composants Phase 2 — État des lieux", level=2)
 
 etat_rows = [
     # (Composant, Fichier, Statut, Description)
-    ("Serveur MLflow",      "Dockerfile.mlflow\ndocker-compose.dev.yml",
+    ("Serveur MLflow",      "docker/mlflow/Dockerfile\ndocker/docker-compose.dev.yml",
      "OK", "Container Docker port 5001 — mlflow==3.11.1\n--serve-artifacts activé"),
     ("Tracking training",   "src/train/training.py",
      "OK", "10 params + 11 métriques + 3 artifacts + 2 tags\nloggés à chaque run"),
