@@ -176,6 +176,33 @@ p.add_run(" → page d'accueil MLflow avec la liste des expériences.")
 doc.add_paragraph("Arrêter le serveur (optionnel) :").runs[0].bold = True
 add_code_block(doc, "docker-compose -f docker/docker-compose.dev.yml stop mlflow")
 
+doc.add_heading("Dépannage Test 1 — Erreurs courantes", level=3)
+
+doc.add_paragraph("Erreur : container name already in use").runs[0].bold = True
+add_code_block(doc,
+    "Error response from daemon: Conflict. The container name \"/blood_cell_mlflow\"\n"
+    "is already in use by container \"xxxxxxxx\"."
+)
+doc.add_paragraph("Solution : supprimer le container existant puis relancer :")
+add_code_block(doc,
+    "docker compose -f docker/docker-compose.dev.yml down mlflow\n"
+    "docker compose -f docker/docker-compose.dev.yml up -d --build mlflow"
+)
+add_info_box(doc, "Alternative si tu veux juste redémarrer sans rebuild : "
+             "docker compose -f docker/docker-compose.dev.yml restart mlflow")
+
+doc.add_paragraph("Erreur : port 5001 already allocated").runs[0].bold = True
+add_code_block(doc,
+    "Error response from daemon: driver failed programming external connectivity:\n"
+    "Bind for 0.0.0.0:5001 failed: port is already allocated."
+)
+doc.add_paragraph("Solution : trouver et arrêter le processus qui utilise le port :")
+add_code_block(doc,
+    "# Windows\nGet-Process -Id (Get-NetTCPConnection -LocalPort 5001).OwningProcess\n"
+    "Stop-Process -Id <PID> -Force\n\n"
+    "# Mac\nlsof -i :5001\nkill -9 <PID>"
+)
+
 # ── TEST 2 ────────────────────────────────────────────────────────────────────
 doc.add_heading("Test 2 — Entraînement avec tracking MLflow", level=2)
 add_warning_box(doc, "Le serveur MLflow (Test 1) doit être démarré avant ce test.")
@@ -445,6 +472,31 @@ doc.add_paragraph(
 )
 add_warning_box(doc, "Sur Windows : lancer avec $env:PYTHONIOENCODING='utf-8' "
                 "pour éviter l'erreur d'encodage des emojis MLflow.")
+
+doc.add_heading("Alternative — Déclencher @challenger via un vrai run", level=3)
+doc.add_paragraph(
+    "Il est aussi possible de faire apparaître @challenger en lançant un nouvel entraînement "
+    "dont les métriques sont inférieures à la version @production. "
+    "Le garde-fou bloque alors la promotion et le nouveau modèle reste @challenger."
+)
+add_warning_box(doc, "Avec 100 images et 1 epoch, le résultat est aléatoire : "
+                "le run peut aussi passer les garde-fous et devenir @production (Version N+1 sans challenger). "
+                "Utiliser --seed 999 augmente les chances d'obtenir de mauvaises métriques.")
+add_code_block(doc,
+    "# Windows (PowerShell)\n"
+    "python -m src.train.training `\n"
+    "  --data-dir data/Source_100 --output-dir models `\n"
+    "  --epochs-head 1 --epochs-full 1 --batch-size 8 `\n"
+    "  --run-type base --part 0 --seed 999\n\n"
+    "# Mac\n"
+    "python -m src.train.training \\\n"
+    "  --data-dir data/Source_100 --output-dir models \\\n"
+    "  --epochs-head 1 --epochs-full 1 --batch-size 8 \\\n"
+    "  --run-type base --part 0 --seed 999"
+)
+add_info_box(doc, "Si le run échoue les garde-fous → Version N+1 reçoit @challenger dans le Registry. "
+             "Si le run les passe → Version N+1 devient @production (démo moins parlante). "
+             "Pour une démo garantie, préférer scripts/demo_garde_fou.py (résultat certain, ~5 sec).")
 
 # ── TEST 7 ────────────────────────────────────────────────────────────────────
 doc.add_heading("Test 7 — MLproject (reproductibilité, optionnel)", level=2)
