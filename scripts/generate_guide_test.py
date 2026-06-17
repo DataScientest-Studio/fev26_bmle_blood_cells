@@ -1,4 +1,4 @@
-"""Génère le guide de test Phase 1 en Word dans reports/."""
+"""Génère le guide de test Phase 1 + état des lieux Phase 2 en Word dans reports/."""
 
 from pathlib import Path
 from docx import Document
@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import datetime
 
-OUTPUT = Path(__file__).parents[1] / "reports" / "Guide_Test_Phase1.docx"
+OUTPUT = Path(__file__).parents[1] / "reports" / "Guide_Test_Phases1_2.docx"
 
 
 def set_cell_bg(cell, hex_color: str):
@@ -370,6 +370,178 @@ for i, row_data in enumerate(recap_rows):
         run.font.size = Pt(9)
         if j == 2:
             run.font.color.rgb = RGBColor(0x00, 0x70, 0x00)
+
+doc.add_page_break()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ÉTAT DES LIEUX — PHASE 2
+# ══════════════════════════════════════════════════════════════════════════════
+phase2_title = doc.add_heading("État des lieux — Phase 2 : MLflow Tracking", level=1)
+phase2_title.runs[0].font.color.rgb = RGBColor(0x1F, 0x49, 0x7D)
+
+doc.add_paragraph(
+    f"Rédigé le {datetime.date.today().strftime('%d %B %Y')}  —  "
+    "Deadline Phase 2 : 1er Juillet 2026"
+).alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+doc.add_paragraph()
+
+# ── Objectifs Phase 2 ─────────────────────────────────────────────────────────
+doc.add_heading("Objectifs atteints", level=2)
+p = doc.add_paragraph()
+for line in [
+    "Tracking MLflow complet sur chaque run d'entraînement (métriques, paramètres, artifacts, tags)",
+    "Model Registry avec aliases @production / @challenger (MLflow 3.x — stages dépréciés)",
+    "Garde-fous de promotion pour les classes critiques erythroblast et ig",
+    "predict_model.py câblé au Registry MLflow (@production) + logging Supabase",
+    "MLproject pour la reproductibilité des runs",
+    "Serveur MLflow dans Docker (port 5001, SQLite, artifacts servis via HTTP)",
+]:
+    p = doc.add_paragraph(line, style="List Bullet")
+    p.runs[0].font.size = Pt(10)
+
+add_info_box(doc, "Ni Airflow ni Cron ne sont utilisés en Phase 2. "
+             "Le scheduling automatique des retrains est prévu en Phase 3.")
+
+# ── Tableau État des lieux ────────────────────────────────────────────────────
+doc.add_heading("Composants Phase 2 — État des lieux", level=2)
+
+etat_rows = [
+    # (Composant, Fichier, Statut, Description)
+    ("Serveur MLflow",      "Dockerfile.mlflow\ndocker-compose.dev.yml",
+     "OK", "Container Docker port 5001 — mlflow==3.11.1\n--serve-artifacts activé"),
+    ("Tracking training",   "src/train/training.py",
+     "OK", "10 params + 11 métriques + 3 artifacts + 2 tags\nloggés à chaque run"),
+    ("Artifacts loggés",    "models/confusion_matrix.png\nmodels/classification_report.txt\nmodels/label_mapping.json",
+     "OK", "Uploadés via HTTP vers le container\nVisibles dans MLflow UI → Artifacts"),
+    ("Model Registry",      "MLFLOW_MODEL_NAME\n= blood-cell-densenet121",
+     "OK", "Aliases @production / @challenger\n(MLflow 3.x — pas de stages)"),
+    ("Garde-fous promotion","_register_and_promote()\nRECALL_TOLERANCE = 0.02",
+     "OK", "macro_f1 >= prod + recall_erythroblast\net recall_ig non régressifs (±2%)"),
+    ("Prédiction MLflow",   "src/models/predict_model.py",
+     "OK", "Charge @production depuis Registry\nFallback .pth si MLflow indisponible"),
+    ("Logging Supabase",    "predict_model._log_to_supabase()",
+     "OK", "inference_ms + predicted_class\nInsert dans table predictions"),
+    ("MLproject",           "MLproject + conda.yaml",
+     "OK", "mlflow run . -e train --env-manager=local\n-P data_dir=... -P epochs_head=..."),
+    ("Tables SQL MLflow",   "mlruns/mlflow.db (SQLite)",
+     "AUTO", "Créées automatiquement par Alembic\nau démarrage du container"),
+    ("API /predict MLflow", "src/serving/api.py",
+     "Phase 3", "Non câblée — charge encore le .pth local\nRefactoring prévu Phase 3"),
+    ("Scheduling retrain",  "Airflow / Cron",
+     "Phase 3", "Aucun scheduler en Phase 2\nA définir avec le mentor"),
+]
+
+table2 = doc.add_table(rows=1, cols=4)
+table2.style = "Table Grid"
+hdrs2 = ["Composant", "Fichier / Config", "Statut", "Description"]
+col_colors = ["1F497D", "1F497D", "1F497D", "1F497D"]
+for i, (cell, hdr) in enumerate(zip(table2.rows[0].cells, hdrs2)):
+    set_cell_bg(cell, "1F497D")
+    set_cell_border(cell)
+    r = cell.paragraphs[0].add_run(hdr)
+    r.bold = True
+    r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    r.font.size = Pt(9)
+
+STATUS_COLORS = {
+    "OK":      ("D4EDDA", RGBColor(0x00, 0x70, 0x00)),
+    "AUTO":    ("FFF3CD", RGBColor(0x85, 0x60, 0x00)),
+    "Phase 3": ("F8D7DA", RGBColor(0x80, 0x00, 0x00)),
+}
+
+for i, (composant, fichier, statut, description) in enumerate(etat_rows):
+    row = table2.add_row().cells
+    bg = "EBF3FB" if i % 2 == 0 else "FFFFFF"
+    status_bg, status_color = STATUS_COLORS.get(statut, (bg, RGBColor(0, 0, 0)))
+
+    for j, (cell, content) in enumerate(zip(row, [composant, fichier, statut, description])):
+        cell_bg = status_bg if j == 2 else bg
+        set_cell_bg(cell, cell_bg)
+        set_cell_border(cell)
+        r = cell.paragraphs[0].add_run(content)
+        r.font.size = Pt(8.5)
+        if j == 2:
+            r.bold = True
+            r.font.color.rgb = status_color
+
+# ── Tables SQL détail ─────────────────────────────────────────────────────────
+doc.add_heading("Tables SQL MLflow (auto-créées par Alembic)", level=2)
+add_info_box(doc, "Contrairement à Supabase (init_db.py manuel), les tables MLflow "
+             "sont créées automatiquement par le framework au premier démarrage du container.")
+
+sql_rows = [
+    ("experiments",           "Expérience bloodcells-densenet121"),
+    ("runs",                  "Chaque run training.py (run_id, status, timestamps)"),
+    ("params",                "batch_size, lr_head, n_train... (mlflow.log_param)"),
+    ("metrics",               "macro_f1, recall_ig... (mlflow.log_metric)"),
+    ("latest_metrics",        "Dernière valeur de chaque métrique par run"),
+    ("tags",                  "git_commit, run_type"),
+    ("registered_models",     "blood-cell-densenet121"),
+    ("model_versions",        "v1 → v8 (une par run)"),
+    ("registered_model_aliases", "@production, @challenger"),
+    ("logged_models",         "Modèles loggés via mlflow.pytorch.log_model()"),
+    ("alembic_version",       "Version du schéma SQLite (migrations auto)"),
+]
+
+table3 = doc.add_table(rows=1, cols=2)
+table3.style = "Table Grid"
+for cell, hdr in zip(table3.rows[0].cells, ["Table SQLite", "Rôle dans le projet"]):
+    set_cell_bg(cell, "2E75B6")
+    set_cell_border(cell)
+    r = cell.paragraphs[0].add_run(hdr)
+    r.bold = True
+    r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    r.font.size = Pt(9)
+
+for i, (table_name, role) in enumerate(sql_rows):
+    row = table3.add_row().cells
+    bg = "EBF3FB" if i % 2 == 0 else "FFFFFF"
+    for j, (cell, content) in enumerate(zip(row, [table_name, role])):
+        set_cell_bg(cell, bg)
+        set_cell_border(cell)
+        r = cell.paragraphs[0].add_run(content)
+        r.font.size = Pt(9)
+        if j == 0:
+            r.font.name = "Courier New"
+
+# ── Métriques loggées ─────────────────────────────────────────────────────────
+doc.add_heading("Métriques et paramètres loggés dans chaque run", level=2)
+
+doc.add_paragraph("Paramètres (10)").runs[0].bold = True
+add_code_block(doc,
+    "batch_size · lr_head · lr_full · weight_decay · epochs_head · epochs_full\n"
+    "n_train · n_val · n_test · optimizer · part"
+)
+doc.add_paragraph("Métriques (11 + courbes par epoch)").runs[0].bold = True
+add_code_block(doc,
+    "best_val_acc · test_acc · macro_f1 · weighted_f1\n"
+    "precision_macro · recall_macro\n"
+    "recall_erythroblast  <- classe critique\n"
+    "recall_ig            <- classe critique\n"
+    "train_time_s · n_params\n"
+    "train_loss_epN · val_loss_epN · train_acc_epN · val_acc_epN  (N = epoch)"
+)
+doc.add_paragraph("Tags (2)").runs[0].bold = True
+add_code_block(doc, "git_commit  ·  run_type (base | retrain)")
+
+# ── Garde-fous ────────────────────────────────────────────────────────────────
+doc.add_heading("Logique des garde-fous de promotion", level=2)
+add_code_block(doc,
+    "Nouveau run -> @challenger (toujours)\n"
+    "       |\n"
+    "       v\n"
+    "  macro_f1 >= prod_f1                      ?\n"
+    "  recall_erythroblast >= prod_ery - 0.02   ?   <- tolérance 2%\n"
+    "  recall_ig >= prod_ig - 0.02              ?   <- tolérance 2%\n"
+    "       |\n"
+    "   OUI (tout)        NON (un seul suffit)\n"
+    "  @production   ->  reste @challenger + raison affichée"
+)
+add_info_box(doc,
+    "Script de démonstration : python scripts/demo_garde_fou.py\n"
+    "Simule un challenger dégradé et affiche la décision du garde-fou avec les valeurs réelles."
+)
 
 doc.save(OUTPUT)
 print(f"Guide généré : {OUTPUT}")

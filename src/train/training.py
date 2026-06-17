@@ -10,10 +10,12 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import time
 import warnings
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import mlflow
 import mlflow.pytorch
 import numpy as np
@@ -24,16 +26,22 @@ import torch.optim as optim
 from dotenv import load_dotenv
 from mlflow.tracking import MlflowClient
 from PIL import Image
+from sklearn.metrics import (
+    classification_report, confusion_matrix,
+    f1_score, precision_score, recall_score,
+)
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 warnings.filterwarnings("ignore")
+plt.switch_backend("Agg")
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
 MLFLOW_MODEL_NAME = "blood-cell-densenet121"
+RECALL_TOLERANCE = 0.02
 
 CLASSES = [
     "basophil", "eosinophil", "erythroblast", "ig",
@@ -55,6 +63,8 @@ DEFAULT_CFG = {
     "val_size"    : 0.15,
     "seed"        : 42,
     "input_size"  : 224,
+    "run_type"    : "base",
+    "part"        : 0,
 }
 
 
@@ -129,14 +139,91 @@ def _evaluate(model, loader, criterion, device):
     return total_loss / total, correct / total
 
 
+@torch.no_grad()
+def _predict_all(model, loader, device):
+    """Retourne prédictions, vraies étiquettes et probabilités sur un DataLoader."""
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    for imgs, lbls in loader:
+        imgs = imgs.to(device)
+        probs = torch.softmax(model(imgs), dim=1).cpu().numpy()
+        all_preds.extend(probs.argmax(axis=1).tolist())
+        all_labels.extend(lbls.tolist())
+        all_probs.append(probs)
+    return np.array(all_preds), np.array(all_labels), np.vstack(all_probs)
+
+
+def _compute_test_metrics(preds: np.ndarray, labels: np.ndarray) -> dict:
+    per_class_recall = recall_score(labels, preds, average=None, zero_division=0)
+    return {
+        "macro_f1":            f1_score(labels, preds, average="macro",    zero_division=0),
+        "weighted_f1":         f1_score(labels, preds, average="weighted",  zero_division=0),
+        "precision_macro":     precision_score(labels, preds, average="macro",   zero_division=0),
+        "recall_macro":        recall_score(labels, preds, average="macro",      zero_division=0),
+        "recall_erythroblast": per_class_recall[CLASSES.index("erythroblast")],
+        "recall_ig":           per_class_recall[CLASSES.index("ig")],
+    }
+
+
+def _log_artifacts(preds: np.ndarray, labels: np.ndarray, output_dir: Path) -> None:
+    """Génère et logue confusion_matrix.png, classification_report.txt, label_mapping.json."""
+    # Confusion matrix
+    cm = confusion_matrix(labels, preds)
+    fig, ax = plt.subplots(figsize=(9, 8))
+    im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    plt.colorbar(im, ax=ax)
+    ax.set(
+        xticks=range(len(CLASSES)), yticks=range(len(CLASSES)),
+        xticklabels=CLASSES, yticklabels=CLASSES,
+        xlabel="Prédit", ylabel="Réel",
+        title="Matrice de confusion — test set",
+    )
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    for i in range(len(CLASSES)):
+        for j in range(len(CLASSES)):
+            ax.text(j, i, str(cm[i, j]), ha="center", va="center",
+                    color="white" if cm[i, j] > cm.max() / 2 else "black")
+    fig.tight_layout()
+    cm_path = output_dir / "confusion_matrix.png"
+    fig.savefig(cm_path, dpi=120)
+    plt.close(fig)
+    mlflow.log_artifact(str(cm_path))
+
+    # Classification report
+    report = classification_report(labels, preds, target_names=CLASSES, digits=3)
+    report_path = output_dir / "classification_report.txt"
+    report_path.write_text(report)
+    mlflow.log_artifact(str(report_path))
+
+    # Label mapping
+    mapping_path = output_dir / "label_mapping.json"
+    mapping_path.write_text(json.dumps({i: c for i, c in enumerate(CLASSES)}, indent=2))
+    mlflow.log_artifact(str(mapping_path))
+
+
+def _get_git_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return "unknown"
+
+
 def _setup_mlflow():
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{ROOT}/mlflow.db")
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("blood-cell-classification")
+    mlflow.set_experiment("bloodcells-densenet121")
 
 
-def _register_and_promote(model, run_id: str, test_acc: float) -> None:
-    """Enregistre le modèle dans le Registry et promeut si meilleur que la version en Production."""
+def _register_and_promote(run_id: str, metrics: dict) -> None:
+    """Enregistre le modèle et promeut via aliases MLflow 3.x (@production / @challenger).
+
+    Garde-fous de promotion :
+      - macro_f1 >= prod (strict)
+      - recall_erythroblast et recall_ig non régressifs (tolérance RECALL_TOLERANCE)
+    """
     client = MlflowClient()
 
     mv = mlflow.register_model(
@@ -144,37 +231,53 @@ def _register_and_promote(model, run_id: str, test_acc: float) -> None:
         name=MLFLOW_MODEL_NAME,
     )
     new_version = mv.version
+    client.set_registered_model_alias(MLFLOW_MODEL_NAME, "challenger", new_version)
+    print(f"  Version {new_version} enregistrée -> @challenger")
 
     try:
-        prod_versions = client.get_latest_versions(MLFLOW_MODEL_NAME, stages=["Production"])
-        if prod_versions:
-            prev_run = client.get_run(prod_versions[0].run_id)
-            prev_acc = float(prev_run.data.metrics.get("test_acc", 0.0))
-            if test_acc > prev_acc:
-                client.transition_model_version_stage(
-                    name=MLFLOW_MODEL_NAME, version=prod_versions[0].version,
-                    stage="Archived",
-                )
-                client.transition_model_version_stage(
-                    name=MLFLOW_MODEL_NAME, version=new_version, stage="Production",
-                )
-                print(f"  Nouveau modèle promu en Production (test_acc {test_acc:.4f} > {prev_acc:.4f})")
-            else:
-                client.transition_model_version_stage(
-                    name=MLFLOW_MODEL_NAME, version=new_version, stage="Staging",
-                )
-                print(f"  Modèle précédent conservé en Production (test_acc {prev_acc:.4f} >= {test_acc:.4f})")
+        prod_mv = client.get_model_version_by_alias(MLFLOW_MODEL_NAME, "production")
+        prod_run = client.get_run(prod_mv.run_id)
+        pm = prod_run.data.metrics
+
+        prod_f1          = float(pm.get("macro_f1", 0.0))
+        prod_recall_ery  = float(pm.get("recall_erythroblast", 0.0))
+        prod_recall_ig   = float(pm.get("recall_ig", 0.0))
+
+        new_f1          = float(metrics.get("macro_f1", 0.0))
+        new_recall_ery  = float(metrics.get("recall_erythroblast", 0.0))
+        new_recall_ig   = float(metrics.get("recall_ig", 0.0))
+
+        f1_ok          = new_f1 >= prod_f1
+        recall_ery_ok  = new_recall_ery >= prod_recall_ery - RECALL_TOLERANCE
+        recall_ig_ok   = new_recall_ig  >= prod_recall_ig  - RECALL_TOLERANCE
+
+        if f1_ok and recall_ery_ok and recall_ig_ok:
+            client.set_registered_model_alias(MLFLOW_MODEL_NAME, "production", new_version)
+            client.delete_registered_model_alias(MLFLOW_MODEL_NAME, "challenger")
+            print(f"  [ok] Promu @production  macro_f1 {new_f1:.4f} >= {prod_f1:.4f}")
         else:
-            client.transition_model_version_stage(
-                name=MLFLOW_MODEL_NAME, version=new_version, stage="Production",
-            )
-            print("  Premier modèle enregistré → promu en Production")
-    except Exception as e:
-        print(f"  Avertissement Registry : {e}")
+            reasons = []
+            if not f1_ok:
+                reasons.append(f"macro_f1 {new_f1:.4f} < {prod_f1:.4f}")
+            if not recall_ery_ok:
+                reasons.append(
+                    f"recall_erythroblast {new_recall_ery:.4f} < {prod_recall_ery:.4f} - {RECALL_TOLERANCE}"
+                )
+            if not recall_ig_ok:
+                reasons.append(
+                    f"recall_ig {new_recall_ig:.4f} < {prod_recall_ig:.4f} - {RECALL_TOLERANCE}"
+                )
+            print(f"  [KO] Garde-fou — reste @challenger : {' | '.join(reasons)}")
+
+    except mlflow.exceptions.MlflowException:
+        client.set_registered_model_alias(MLFLOW_MODEL_NAME, "production", new_version)
+        client.delete_registered_model_alias(MLFLOW_MODEL_NAME, "challenger")
+        print("  Premier modèle -> @production")
 
 
 def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
     _setup_mlflow()
+    t_start = time.time()
 
     seed = cfg["seed"]
     random.seed(seed)
@@ -203,7 +306,8 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
         stratify=trainval_lbls,
         random_state=seed,
     )
-    print(f"Split   : train={len(idx_train)}  val={len(idx_val)}  test={len(idx_test)}")
+    n_train, n_val, n_test = len(idx_train), len(idx_val), len(idx_test)
+    print(f"Split   : train={n_train}  val={n_val}  test={n_test}")
 
     tf = get_transform(cfg["input_size"])
 
@@ -228,10 +332,24 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
     best_val_acc = 0.0
 
     with mlflow.start_run() as run:
-        mlflow.log_params(cfg)
-        mlflow.log_param("model", "densenet121")
-        mlflow.log_param("num_classes", len(CLASSES))
-        mlflow.log_param("device", device)
+
+        # ── Params ───────────────────────────────────────────────────────────
+        mlflow.log_params({
+            **cfg,
+            "model":       "densenet121",
+            "num_classes": len(CLASSES),
+            "device":      device,
+            "optimizer":   "AdamW",
+            "n_train":     n_train,
+            "n_val":       n_val,
+            "n_test":      n_test,
+        })
+
+        # ── Tags ─────────────────────────────────────────────────────────────
+        mlflow.set_tags({
+            "git_commit": _get_git_commit(),
+            "run_type":   cfg.get("run_type", "base"),
+        })
 
         # ── Phase 1 : backbone gelé ──────────────────────────────────────────
         HEAD_NAMES = {"classifier", "head", "fc"}
@@ -295,7 +413,7 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
                 patience_cnt = 0
             else:
                 patience_cnt += 1
-            tag = " ✓" if improved else f" (patience {patience_cnt}/{cfg['patience']})"
+            tag = " [ok]" if improved else f" (patience {patience_cnt}/{cfg['patience']})"
             print(f"  Ep {epoch+1:02d}  train={ta:.3f}  val={va:.3f}  ({time.time()-t0:.0f}s){tag}")
             if patience_cnt >= cfg["patience"]:
                 print("  Early stopping.")
@@ -304,27 +422,44 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
         # ── Évaluation test ──────────────────────────────────────────────────
         model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
         _, test_acc = _evaluate(model, test_dl, criterion, device)
+        preds, trues, _ = _predict_all(model, test_dl, device)
 
-        mlflow.log_metrics({"best_val_acc": best_val_acc, "test_acc": test_acc})
-        mlflow.pytorch.log_model(
-            model,
-            name="densenet121",
-        )
+        test_metrics = _compute_test_metrics(preds, trues)
+        train_time_s = time.time() - t_start
+        n_params = sum(p.numel() for p in model.parameters())
 
-        print(f"\nMeilleur val_acc : {best_val_acc:.4f}")
-        print(f"Test accuracy    : {test_acc:.4f}")
-        print(f"Modèle           : {model_path}")
-        print(f"MLflow run ID    : {run.info.run_id}")
+        mlflow.log_metrics({
+            "best_val_acc": best_val_acc,
+            "test_acc":     test_acc,
+            "train_time_s": round(train_time_s, 1),
+            "n_params":     n_params,
+            **test_metrics,
+        })
 
-        # ── Registry : enregistrement + comparaison ──────────────────────────
+        # ── Artifacts ────────────────────────────────────────────────────────
+        _log_artifacts(preds, trues, output_dir)
+
+        # ── Modèle ───────────────────────────────────────────────────────────
+        mlflow.pytorch.log_model(model, name="densenet121")
+
+        print(f"\nMeilleur val_acc    : {best_val_acc:.4f}")
+        print(f"Test accuracy       : {test_acc:.4f}")
+        print(f"macro_f1            : {test_metrics['macro_f1']:.4f}")
+        print(f"recall_erythroblast : {test_metrics['recall_erythroblast']:.4f}")
+        print(f"recall_ig           : {test_metrics['recall_ig']:.4f}")
+        print(f"Modèle              : {model_path}")
+        print(f"MLflow run ID       : {run.info.run_id}")
+
+        # ── Registry ─────────────────────────────────────────────────────────
         print("\nMLflow Registry :")
-        _register_and_promote(model, run.info.run_id, test_acc)
+        _register_and_promote(run.info.run_id, {**test_metrics, "test_acc": test_acc})
 
     metrics = {
         "best_val_acc": best_val_acc,
-        "test_acc": test_acc,
+        "test_acc":     test_acc,
+        **test_metrics,
         "history": history,
-        "config": {k: v for k, v in cfg.items()},
+        "config":  {k: v for k, v in cfg.items()},
     }
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
     (output_dir / "class_names.json").write_text(json.dumps(CLASSES))
@@ -340,6 +475,12 @@ def _parse_args():
     parser.add_argument("--epochs-head", type=int, default=DEFAULT_CFG["epochs_head"])
     parser.add_argument("--epochs-full", type=int, default=DEFAULT_CFG["epochs_full"])
     parser.add_argument("--batch-size",  type=int, default=DEFAULT_CFG["batch_size"])
+    parser.add_argument("--run-type",    default="base", choices=["base", "retrain"],
+                        help="Type de run MLflow : base ou retrain")
+    parser.add_argument("--part",        type=int, default=0,
+                        help="Numéro de la partie du dataset (0 = tout)")
+    parser.add_argument("--seed",        type=int, default=DEFAULT_CFG["seed"],
+                        help="Graine aléatoire (défaut : 42)")
     return parser.parse_args()
 
 
@@ -350,10 +491,19 @@ if __name__ == "__main__":
         p = Path(p)
         return p if p.is_absolute() else ROOT / p
 
-    cfg = {**DEFAULT_CFG,
-           "epochs_head": args.epochs_head,
-           "epochs_full": args.epochs_full,
-           "batch_size" : args.batch_size}
+    cfg = {
+        **DEFAULT_CFG,
+        "epochs_head": args.epochs_head,
+        "epochs_full": args.epochs_full,
+        "batch_size":  args.batch_size,
+        "run_type":    args.run_type,
+        "part":        args.part,
+        "seed":        args.seed,
+    }
 
     metrics = train(_resolve(args.data_dir), _resolve(args.output_dir), cfg)
-    print(f"\nRésumé : val_acc={metrics['best_val_acc']:.4f}  test_acc={metrics['test_acc']:.4f}")
+    print(
+        f"\nRésumé : val_acc={metrics['best_val_acc']:.4f}"
+        f"  test_acc={metrics['test_acc']:.4f}"
+        f"  macro_f1={metrics['macro_f1']:.4f}"
+    )
