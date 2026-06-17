@@ -1,0 +1,23 @@
+name: bloodcells-densenet121
+
+conda_env: conda.yaml
+
+entry_points:
+  train:
+    parameters:
+      data_dir:    {type: str, default: "data/raw"}
+      output_dir:  {type: str, default: "models"}
+      epochs_head: {type: int, default: 5}
+      epochs_full: {type: int, default: 10}
+      batch_size:  {type: int, default: 32}
+      part:        {type: int, default: 0}
+      run_type:    {type: str, default: "base"}
+    command: >
+      python -m src.train.training
+      --data-dir {data_dir}
+      --output-dir {output_dir}
+      --epochs-head {epochs_head}
+      --epochs-full {epochs_full}
+      --batch-size {batch_size}
+      --part {part}
+      --run-type {run_type}

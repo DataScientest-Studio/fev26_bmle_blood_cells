@@ -4,50 +4,53 @@ Confusion matrices + classification reports pour les meilleurs modèles.
   - Best ConvNeXt-Tiny  : A2_ep20_b32
   - Best DenseNet-121   : A2_ep20_b32
 """
-import os, json, random, warnings
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-warnings.filterwarnings('ignore')
-
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
-import seaborn as sns
-from pathlib import Path
-from PIL import Image
-
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-import timm
-from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 from sklearn.metrics import (
     accuracy_score, f1_score, roc_auc_score,
     confusion_matrix, classification_report
 )
-from tqdm import tqdm
+from sklearn.model_selection import train_test_split
+import timm
+from torchvision import transforms
+from torch.utils.data import DataLoader, Dataset
+import torch.nn as nn
+import torch
+from PIL import Image
+from pathlib import Path
+import seaborn as sns
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import random
+import warnings
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+warnings.filterwarnings('ignore')
+
+matplotlib.use('Agg')
+
 
 # ── Configuration ────────────────────────────────────────────────────────
-DATA_DIR    = Path(r"C:\Users\julie\Downloads\datasets\Acevedo\Acevedo")
-OUTPUT_DIR  = Path(r"C:\Users\julie\MAR26-BDS-BLOODCELLS-1\reports\Sara_DL_convnext_densenet_hyperparam")
+DATA_DIR = Path(r"C:\Users\julie\Downloads\datasets\Acevedo\Acevedo")
+OUTPUT_DIR = Path(r"C:\Users\julie\MAR26-BDS-BLOODCELLS-1\reports\Sara_DL_convnext_densenet_hyperparam")
 SUBSAMPLE_N = 2000
-TEST_SIZE   = 0.15
-VAL_SIZE    = 0.15
-SEED        = 42
-DEVICE      = ("cuda" if torch.cuda.is_available() else
-               "mps"  if torch.backends.mps.is_available() else "cpu")
-IGNORED     = {"output"}
+TEST_SIZE = 0.15
+VAL_SIZE = 0.15
+SEED = 42
+DEVICE = ("cuda" if torch.cuda.is_available() else
+          "mps" if torch.backends.mps.is_available() else "cpu")
+IGNORED = {"output"}
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD  = [0.229, 0.224, 0.225]
+IMAGENET_STD = [0.229, 0.224, 0.225]
 
 BEST_MODELS = [
     {"exp": "A2_ep20_b32", "model_name": "convnext_tiny", "batch": 32, "activation": "default"},
-    {"exp": "A2_ep20_b32", "model_name": "densenet121",   "batch": 32, "activation": "default"},
+    {"exp": "A2_ep20_b32", "model_name": "densenet121", "batch": 32, "activation": "default"},
 ]
 
 # ── Seed ─────────────────────────────────────────────────────────────────
-random.seed(SEED); np.random.seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
 torch.manual_seed(SEED)
 if DEVICE == "cuda":
     torch.cuda.manual_seed_all(SEED)
@@ -62,7 +65,8 @@ paths, labels = [], []
 for label, cls in enumerate(CLASS_NAMES):
     for p in (DATA_DIR / cls).iterdir():
         if p.suffix.lower() in [".jpg", ".jpeg", ".png", ".tiff", ".bmp"]:
-            paths.append(p); labels.append(label)
+            paths.append(p)
+            labels.append(label)
 
 rng = np.random.default_rng(SEED)
 n_per = SUBSAMPLE_N // NUM_CLASSES
@@ -71,13 +75,13 @@ for c in range(NUM_CLASSES):
     idx = [i for i, l in enumerate(labels) if l == c]
     sel.extend(rng.choice(idx, size=min(n_per, len(idx)), replace=False).tolist())
 sel.sort()
-paths  = [paths[i]  for i in sel]
+paths = [paths[i] for i in sel]
 labels = [labels[i] for i in sel]
 
 idx = np.arange(len(paths))
 idx_tv, idx_test = train_test_split(idx, test_size=TEST_SIZE, stratify=labels, random_state=SEED)
 labels_tv = [labels[i] for i in idx_tv]
-idx_train, idx_val = train_test_split(idx_tv, test_size=VAL_SIZE/(1-TEST_SIZE),
+idx_train, idx_val = train_test_split(idx_tv, test_size=VAL_SIZE / (1 - TEST_SIZE),
                                       stratify=labels_tv, random_state=SEED)
 print(f"Test set : {len(idx_test)} images")
 
@@ -87,19 +91,25 @@ tf = transforms.Compose([
     transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
 ])
 
+
 class DS(Dataset):
     def __init__(self, paths, labels, indices, tf):
         self.p = [paths[i] for i in indices]
-        self.l = [labels[i] for i in indices]
+        self.labels = [labels[i] for i in indices]
         self.tf = tf
+
     def __len__(self): return len(self.p)
+
     def __getitem__(self, i):
-        return self.tf(Image.open(self.p[i]).convert("RGB")), self.l[i]
+        return self.tf(Image.open(self.p[i]).convert("RGB")), self.labels[i]
 
 # ── Modèle ────────────────────────────────────────────────────────────────
+
+
 class _PoolFlatten(nn.Module):
     def forward(self, x):
         return x.mean([-2, -1]) if x.dim() == 4 else x
+
 
 def build_model(model_name, activation):
     if activation == "default":
@@ -111,11 +121,15 @@ def build_model(model_name, activation):
         nn.Linear(model.num_features, 256), act_fn, nn.Dropout(0.3),
         nn.Linear(256, NUM_CLASSES),
     )
-    if hasattr(model, 'head'): model.head = head
-    elif hasattr(model, 'classifier'): model.classifier = head
+    if hasattr(model, 'head'):
+        model.head = head
+    elif hasattr(model, 'classifier'):
+        model.classifier = head
     return model
 
 # ── Inférence ─────────────────────────────────────────────────────────────
+
+
 @torch.no_grad()
 def predict(model, loader):
     model.eval()
@@ -123,8 +137,11 @@ def predict(model, loader):
     for imgs, lbls in tqdm(loader, leave=False):
         imgs = imgs.to(DEVICE)
         probs = torch.softmax(model(imgs).float(), dim=1).cpu().numpy()
-        yt.extend(lbls.numpy()); yp.extend(probs.argmax(1)); ys.extend(probs)
+        yt.extend(lbls.numpy())
+        yp.extend(probs.argmax(1))
+        ys.extend(probs)
     return np.array(yt), np.array(yp), np.array(ys)
+
 
 # ── Boucle principale ──────────────────────────────────────────────────────
 fig_cm, axes_cm = plt.subplots(1, 2, figsize=(18, 7))
@@ -143,12 +160,12 @@ for ax, cfg in zip(axes_cm, BEST_MODELS):
     del model
 
     acc = accuracy_score(y_true, y_pred)
-    f1  = f1_score(y_true, y_pred, average="macro", zero_division=0)
+    f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
     auc = roc_auc_score(y_true.astype(int), y_scores, multi_class="ovr",
                         average="macro", labels=list(range(NUM_CLASSES)))
 
     # ── Confusion matrix ──────────────────────────────────────────────────
-    cm      = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred)
     cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
     labels_short = [c[:4] for c in CLASS_NAMES]
@@ -168,7 +185,7 @@ for ax, cfg in zip(axes_cm, BEST_MODELS):
     ax.set_xlabel("Prediction", fontsize=10)
     ax.set_ylabel("Vraie classe", fontsize=10)
     ax.tick_params(axis='x', rotation=35, labelsize=9)
-    ax.tick_params(axis='y', rotation=0,  labelsize=9)
+    ax.tick_params(axis='y', rotation=0, labelsize=9)
 
     # ── Classification report — texte + PNG ──────────────────────────────
     report_str = classification_report(
@@ -225,9 +242,11 @@ for ax, cfg in zip(axes_cm, BEST_MODELS):
     print(f"  -> Rapport sauvegarde : {txt_path.name}  +  {png_path.name}")
 
 plt.suptitle(
-    "Matrices de confusion — meilleurs modeles (A2_ep20_b32)\nValeurs : nombre de predictions | Couleur : taux par classe reelle",
-    fontsize=13, fontweight="bold", y=1.01
-)
+    "Matrices de confusion — meilleurs modeles (A2_ep20_b32)\n"
+    "Valeurs : nombre de predictions | Couleur : taux par classe reelle",
+    fontsize=13,
+    fontweight="bold",
+    y=1.01)
 plt.tight_layout()
 out_path = OUTPUT_DIR / "confusion_best_models.png"
 plt.savefig(out_path, dpi=150, bbox_inches="tight")

@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier et installer les dépendances Python
-COPY requirements-streamlit.txt .
-RUN pip install --upgrade pip && pip install -r requirements-streamlit.txt
+COPY requirements/streamlit.txt requirements/streamlit.txt
+RUN pip install --upgrade pip && pip install -r requirements/streamlit.txt
 
 # Copier le code source
 COPY configs/ ./configs/

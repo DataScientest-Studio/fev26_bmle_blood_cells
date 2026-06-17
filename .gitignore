@@ -1,6 +1,9 @@
 #Dossiers à ignorer
-data/
+/data/*
 !src/data/
+!/data/runs/
+/data/runs/run*/*
+!/data/runs/*.dvc
 CellImagesSource1/
 CellImagesSource/
 src/independent_scripts/outputs/
@@ -165,7 +168,8 @@ mlartifacts/
 
 # Fichiers Word générés (sauf rapports MLOps versionnés)
 *.docx
-!reports/MLOps_fichiers_transfert_DenseNet121.docx
+!reports/Sara/*.docx
+!reports/Romane/*.docx
 
 # Logs de run
 reports/*.log

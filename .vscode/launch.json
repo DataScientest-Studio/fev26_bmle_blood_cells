@@ -9,7 +9,52 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/.env",
-            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": true
+        },
+        {
+            "name": "Lancer API FastAPI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "src.serving.api:app",
+                "--reload",
+                "--port", "8000"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "Test training (Source_100 - 1 epoch)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.train.training",
+            "args": [
+                "--data-dir", "data/Source_100",
+                "--output-dir", "models",
+                "--epochs-head", "1",
+                "--epochs-full", "1",
+                "--batch-size", "8"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
+        },
+        {
+            "name": "Test predict_model (une image)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.models.predict_model",
+            "args": [
+                "--image", "data/Source_100/neutrophil/BNE_100878.jpg",
+                "--model", "models/best_densenet121.pth"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
             "justMyCode": true
         }
     ]

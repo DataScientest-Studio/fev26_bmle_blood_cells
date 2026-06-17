@@ -58,5 +58,5 @@ Ce jeu de données ne contient aucune information permettant d'identifier des pa
 Ce projet repose sur des bibliothèques tierces (PyTorch, MLflow, Streamlit, FastAPI, etc.). Les correctifs de sécurité de ces bibliothèques ne sont pas appliqués automatiquement. Mettre régulièrement à jour les dépendances avec :
 
 ```bash
-pip install --upgrade -r requirements.txt
+pip install --upgrade -r requirements/base.txt
 ```
