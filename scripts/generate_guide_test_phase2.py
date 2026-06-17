@@ -8,7 +8,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import datetime
 
-OUTPUT = Path(__file__).parents[1] / "reports" / "Guide_Test_Phase2.docx"
+OUTPUT = Path(__file__).parents[1] / "reports" / "Sara" / "Guide_Test_Phase2.docx"
 
 
 def set_cell_bg(cell, hex_color: str):
@@ -130,7 +130,7 @@ add_code_block(doc,
     "# Windows (PowerShell)\nTest-NetConnection -ComputerName localhost -Port 5001"
 )
 add_warning_box(doc, "Si le port 5001 est occupé, arrêter l'application qui l'utilise "
-                "ou modifier le mapping dans docker-compose.dev.yml.")
+                "ou modifier le mapping dans docker/docker-compose.dev.yml.")
 
 doc.add_paragraph("Prérequis 3 — .env avec MLFLOW_TRACKING_URI").runs[0].bold = True
 add_code_block(doc, "MLFLOW_TRACKING_URI=http://localhost:5001")
@@ -147,7 +147,7 @@ add_code_block(doc,
     "# Se placer dans le projet\ncd ~/fev26_bmle_blood_cells          # Mac\n"
     "cd \"$env:USERPROFILE\\fev26_bmle_blood_cells\"  # Windows\n\n"
     "# Construire et démarrer le container MLflow\n"
-    "docker-compose -f docker-compose.dev.yml up -d --build mlflow"
+    "docker-compose -f docker/docker-compose.dev.yml up -d --build mlflow"
 )
 
 doc.add_paragraph("Résultat attendu (après ~30s) :").runs[0].bold = True
@@ -174,7 +174,7 @@ r.bold = True
 p.add_run(" → page d'accueil MLflow avec la liste des expériences.")
 
 doc.add_paragraph("Arrêter le serveur (optionnel) :").runs[0].bold = True
-add_code_block(doc, "docker-compose -f docker-compose.dev.yml stop mlflow")
+add_code_block(doc, "docker-compose -f docker/docker-compose.dev.yml stop mlflow")
 
 # ── TEST 2 ────────────────────────────────────────────────────────────────────
 doc.add_heading("Test 2 — Entraînement avec tracking MLflow", level=2)

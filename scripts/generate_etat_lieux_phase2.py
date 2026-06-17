@@ -13,8 +13,8 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUT  = ROOT / "reports" / "Phase1_etat_des_lieux.docx"
-OUTPUT = ROOT / "reports" / "Phases1_2_etat_des_lieux.docx"
+INPUT  = ROOT / "reports" / "Sara" / "Phase1_etat_des_lieux.docx"
+OUTPUT = ROOT / "reports" / "Sara" / "Phases1_2_etat_des_lieux.docx"
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -102,7 +102,7 @@ doc.add_heading("Composants Phase 2", level=3)
 etat_rows = [
     ("1",  "Serveur MLflow (Docker)",
      "✅ OK",
-     "Dockerfile.mlflow\ndocker-compose.dev.yml",
+     "docker/mlflow/Dockerfile\ndocker/docker-compose.dev.yml",
      "Container port 5001 — mlflow==3.11.1\n--serve-artifacts activé (upload HTTP)"),
     ("2",  "Tracking training.py",
      "✅ OK",
