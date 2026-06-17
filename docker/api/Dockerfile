@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier requirements
-COPY requirements-api.txt .
-RUN pip install --upgrade pip && pip install -r requirements-api.txt
+COPY requirements/api.txt requirements/api.txt
+RUN pip install --upgrade pip && pip install -r requirements/api.txt
 
 # Code source
 COPY src/          ./src/

@@ -49,8 +49,11 @@ par Machine Learning et Deep Learning, dans un contexte clinique d'aide au diagn
 │   └── jupyter/            # Scripts .py correspondant aux notebooks
 ├── tests/                  # Tests unitaires (dataset, transforms, predict)
 ├── Makefile                # Commandes raccourcies
-├── requirements.txt        # Dépendances principales
-└── requirements-dev.txt    # Dépendances de développement
+└── requirements/           # Dépendances Python
+    ├── base.txt            # Dépendances principales
+    ├── dev.txt             # Dépendances de développement
+    ├── api.txt             # Dépendances FastAPI
+    └── streamlit.txt       # Dépendances Streamlit
 ```
 
 ---
@@ -66,7 +69,7 @@ source .venv/bin/activate   # Windows : .venv\Scripts\activate
 
 make install
 # ou
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements/base.txt -r requirements/dev.txt
 ```
 
 Copier le fichier d'environnement :

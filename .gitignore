@@ -168,12 +168,8 @@ mlartifacts/
 
 # Fichiers Word générés (sauf rapports MLOps versionnés)
 *.docx
-!reports/MLOps_fichiers_transfert_DenseNet121.docx
-!reports/Phase1_etat_des_lieux.docx
-!reports/Phases1_2_etat_des_lieux.docx
-!reports/Guide_Test_Phase1.docx
-!reports/Guide_Test_Phase2.docx
-!reports/Guide_Test_Phases1_2.docx
+!reports/Sara/*.docx
+!reports/Romane/*.docx
 
 # Logs de run
 reports/*.log

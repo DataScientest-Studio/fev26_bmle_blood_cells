@@ -4,20 +4,20 @@ services:
   # ═══════════════════════════════════════════════════════════════════
   streamlit:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/streamlit/Dockerfile
     container_name: blood_cell_streamlit
     ports:
       - "8501:8501"
     volumes:
       # Code hot-reload
-      - ./src/serving:/app/src/serving
-      - ./app:/app/app
-      - ./src/data:/app/src/data
+      - ../src/serving:/app/src/serving
+      - ../app:/app/app
+      - ../src/data:/app/src/data
       # Données et modèles (partagés avec API)
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./mlruns:/app/mlruns
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../mlruns:/app/mlruns
     environment:
       - PYTHONUNBUFFERED=1
       - API_URL=http://api:8000
@@ -46,21 +46,21 @@ services:
   # ═══════════════════════════════════════════════════════════════════
   api:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ..
+      dockerfile: docker/api/Dockerfile
     container_name: blood_cell_api
     ports:
       - "8000:8000"
     volumes:
       # Code hot-reload
-      - ./src:/app/src
-      - ./configs:/app/configs
-      - ./scripts:/app/scripts
+      - ../src:/app/src
+      - ../configs:/app/configs
+      - ../scripts:/app/scripts
       # Données partagées
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./mlruns:/app/mlruns
-      - ./logs:/app/logs
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../mlruns:/app/mlruns
+      - ../logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
       - MLFLOW_TRACKING_URI=http://mlflow:5000
@@ -82,13 +82,13 @@ services:
   # ═══════════════════════════════════════════════════════════════════
   mlflow:
     build:
-      context: .
-      dockerfile: Dockerfile.mlflow
+      context: ..
+      dockerfile: docker/mlflow/Dockerfile
     container_name: blood_cell_mlflow
     ports:
       - "5001:5000"
     volumes:
-      - ./mlruns:/mlflow
+      - ../mlruns:/mlflow
     environment:
       - MLFLOW_BACKEND_STORE_URI=sqlite:////mlflow/mlflow.db
       - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
@@ -104,4 +104,3 @@ services:
 networks:
   ml_network:
     driver: bridge
-    

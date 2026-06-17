@@ -1,0 +1,98 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.1-python3.11
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    DAGSHUB_USER: ${DAGSHUB_USER}
+    DAGSHUB_TOKEN: ${DAGSHUB_TOKEN}
+    SUPABASE_HOST: ${SUPABASE_HOST}
+    SUPABASE_PORT: ${SUPABASE_PORT}
+    SUPABASE_DB: ${SUPABASE_DB}
+    SUPABASE_USER: ${SUPABASE_USER}
+    SUPABASE_PASSWORD: ${SUPABASE_PASSWORD}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ..:/opt/airflow/project         # accès au code du projet (racine)
+    - ../models:/opt/airflow/project/models
+    - ../data:/opt/airflow/project/data
+    - ../mlruns:/opt/airflow/project/mlruns
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+  networks:
+    - ml_network
+
+services:
+
+  # ── Base de données Airflow ──────────────────────────────────────────────────
+  airflow-db:
+    image: postgres:15
+    container_name: airflow_db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ml_network
+
+  # ── Init Airflow (migration DB + création admin) ──────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Romane \
+          --lastname Beaurepere \
+          --role Admin \
+          --email beaurepere.romane@gmail.com
+    restart: "no"
+
+  # ── Webserver ─────────────────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Scheduler ────────────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    command: scheduler
+    restart: unless-stopped
+
+volumes:
+  airflow_db_data:
+
+networks:
+  ml_network:
+    external: true
+    name: fev26_bmle_blood_cells_ml_network

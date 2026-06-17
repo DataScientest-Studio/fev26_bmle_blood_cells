@@ -13,8 +13,8 @@ help:
 	@echo "  make clean            Nettoyer les fichiers temporaires"
 
 install:
-	$(PYTHON) -m pip install -r requirements.txt
-	$(PYTHON) -m pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install -r requirements/base.txt
+	$(PYTHON) -m pip install -r requirements/dev.txt
 
 streamlit-app:
 	$(PYTHON) -m streamlit run src/streamlit/image_analysis.py
