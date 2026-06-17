@@ -8,17 +8,20 @@ on:
 
 jobs:
   test:
-    name: Tests unitaires
+    name: Tests unitaires (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
 
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Installer les dépendances
