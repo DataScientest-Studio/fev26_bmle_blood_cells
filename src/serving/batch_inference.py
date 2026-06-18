@@ -11,10 +11,10 @@ import cv2
 from pathlib import Path
 import sys
 import os
+from dotenv import load_dotenv
+
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
-
-from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 load_dotenv(Path(__file__).parents[2] / ".env")
