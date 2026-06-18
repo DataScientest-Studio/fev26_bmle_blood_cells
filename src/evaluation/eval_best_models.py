@@ -24,15 +24,22 @@ import numpy as np
 import os
 import random
 import warnings
+from dotenv import load_dotenv
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 warnings.filterwarnings('ignore')
+ROOT = Path(__file__).parents[2]
+load_dotenv(ROOT / ".env")
 
 matplotlib.use('Agg')
 
 
 # ── Configuration ────────────────────────────────────────────────────────
-DATA_DIR = Path(r"C:\Users\julie\Downloads\datasets\Acevedo\Acevedo")
-OUTPUT_DIR = Path(r"C:\Users\julie\MAR26-BDS-BLOODCELLS-1\reports\Sara_DL_convnext_densenet_hyperparam")
+if not os.getenv("ACEVEDO_DATA_DIR"):
+    raise EnvironmentError(
+        "ACEVEDO_DATA_DIR doit être défini dans ton .env local (chemin personnel)."
+    )
+DATA_DIR = Path(os.environ["ACEVEDO_DATA_DIR"])
+OUTPUT_DIR = ROOT / "reports" / "Sara_DL_convnext_densenet_hyperparam"
 SUBSAMPLE_N = 2000
 TEST_SIZE = 0.15
 VAL_SIZE = 0.15

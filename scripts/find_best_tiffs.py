@@ -3,6 +3,7 @@
 Trouve les 3 meilleurs tiffs du CancerImagingArchive avec confiance ~98%
 sur les modèles DL fold 1.
 """
+import os
 import sys
 from pathlib import Path
 import numpy as np
@@ -11,9 +12,18 @@ import timm
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
+from dotenv import load_dotenv
 
-CROSSVAL_DIR = Path("/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches/DL_crossval_ameliorees")
-ARCHIVE_DIR  = Path("/Users/fredericdelabot/Documents/DataScientest/Projet CHU Lyon/CancerImagingArchive")
+ROOT = Path(__file__).parents[1]
+load_dotenv(ROOT / ".env")
+
+if not os.getenv("CROSSVAL_CACHE_DIR") or not os.getenv("CANCER_ARCHIVE_DIR"):
+    raise EnvironmentError(
+        "CROSSVAL_CACHE_DIR et CANCER_ARCHIVE_DIR doivent être définis dans ton .env local "
+        "(chemins personnels, propres à chaque machine)."
+    )
+CROSSVAL_DIR = Path(os.environ["CROSSVAL_CACHE_DIR"])
+ARCHIVE_DIR  = Path(os.environ["CANCER_ARCHIVE_DIR"])
 
 CLASS_NAMES = ["basophil", "eosinophil", "erythroblast", "ig",
                "lymphocyte", "monocyte", "neutrophil", "platelet"]

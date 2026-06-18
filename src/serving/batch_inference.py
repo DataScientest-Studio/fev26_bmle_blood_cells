@@ -14,8 +14,10 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+load_dotenv(Path(__file__).parents[2] / ".env")
 
 try:
     from src.Morphology.morphology_cellpose_v2 import morphology_cellpose_v2, CLASS_CONFIGS
@@ -28,6 +30,10 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 DEFAULT_CROSSVAL_DIR = PROJECT_ROOT / "reports" / "DL_crossval_models"
 ML_BUNDLE_PATH = PROJECT_ROOT / "reports" / "ML_reports_validation" / "best_ml_model.pkl"
+
+# Dossier proposé par défaut dans les sélecteurs image/dossier — surchargeable
+# via DEMO_IMAGES_DIR dans .env, sinon Source_100 (partagé via DagsHub, dispo pour tous).
+DEMO_IMAGES_DIR = Path(os.getenv("DEMO_IMAGES_DIR", str(PROJECT_ROOT / "data" / "Source_100")))
 _ONEDRIVE_CACHE = PROJECT_ROOT / "reports"
 N_FOLDS = 5
 
@@ -913,8 +919,7 @@ with st.sidebar:
 
 # ── Mode : Image unique ────────────────────────────────────────────────────────
 if "🖼️" in mode:
-    _IMG_DEFAULT_FOLDER = Path(
-        "/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches/ImgsDemo")
+    _IMG_DEFAULT_FOLDER = DEMO_IMAGES_DIR
 
     if "image_path" not in st.session_state:
         st.session_state["image_path"] = ""
@@ -964,7 +969,7 @@ if "🖼️" in mode:
 
 # ── Mode : Dossier ─────────────────────────────────────────────────────────────
 else:
-    _DEFAULT_FOLDER = Path("/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches/ImgsDemo")
+    _DEFAULT_FOLDER = DEMO_IMAGES_DIR
     if "folder_path" not in st.session_state:
         st.session_state.folder_path = str(_DEFAULT_FOLDER) if _DEFAULT_FOLDER.exists() else ""
 

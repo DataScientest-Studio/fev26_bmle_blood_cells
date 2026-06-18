@@ -6,6 +6,7 @@ Usage:
     python validate_on_cancer_archive.py
 """
 
+import os
 from pathlib import Path
 import json
 import numpy as np
@@ -16,10 +17,17 @@ from torchvision import transforms
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).parents[1]
+load_dotenv(ROOT / ".env")
 
 # ── Chemins ────────────────────────────────────────────────────────────────────
-DATA_DIR    = Path("/Users/fredericdelabot/Documents/DataScientest/Projet CHU Lyon"
-                   "/CancerImagingArchive/regrouped")
+if not os.getenv("CANCER_ARCHIVE_DIR"):
+    raise EnvironmentError(
+        "CANCER_ARCHIVE_DIR doit être défini dans ton .env local (chemin personnel)."
+    )
+DATA_DIR    = Path(os.environ["CANCER_ARCHIVE_DIR"]) / "regrouped"
 MODELS_DIR  = Path("reports/Fred_DL_pipeline_report_full")
 OUT_DIR     = Path("reports/validation_cancer_archive")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
