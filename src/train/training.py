@@ -98,7 +98,7 @@ def load_dataset(data_dir: Path):
         if not cls_dir.exists():
             continue
         for p in cls_dir.iterdir():
-            if p.suffix.lower() in exts:
+            if p.suffix.lower() in exts and not p.name.startswith("."):
                 paths.append(p)
                 labels.append(label)
     if not paths:
