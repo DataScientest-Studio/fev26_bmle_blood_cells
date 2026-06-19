@@ -6,10 +6,20 @@ Appelle l'API FastAPI (DenseNet-121 uniquement)
 """
 
 import os
+import sys
+import io
+from pathlib import Path
+
 import streamlit as st
 from PIL import Image
 import requests
-import io
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env")
+
+from src.auth.users import verify_user  # noqa: E402
 
 API_URL = os.getenv("API_URL", "http://api:8000")
 
@@ -81,6 +91,28 @@ def show_class_reference() -> None:
             st.caption(desc)
 
 
+def login_screen() -> bool:
+    """Affiche le formulaire de connexion. Retourne True si l'utilisateur est authentifie."""
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("Connexion")
+    with st.form("login_form"):
+        username = st.text_input("Identifiant")
+        password = st.text_input("Mot de passe", type="password")
+        submitted = st.form_submit_button("Se connecter")
+
+    if submitted:
+        if verify_user(username, password):
+            st.session_state["authenticated"] = True
+            st.session_state["username"] = username
+            st.rerun()
+        else:
+            st.error("Identifiant ou mot de passe incorrect.")
+
+    return False
+
+
 def main() -> None:
     """Fonction principale Streamlit."""
     st.set_page_config(
@@ -88,6 +120,15 @@ def main() -> None:
         page_icon="microscope",
         layout="wide",
     )
+
+    if not login_screen():
+        return
+
+    with st.sidebar:
+        st.caption(f"Connecte : {st.session_state['username']}")
+        if st.button("Se deconnecter"):
+            st.session_state.clear()
+            st.rerun()
 
     st.title("Classification de Cellules Sanguines")
     st.markdown("**DenseNet-121** — Mendeley PBC — 8 classes")

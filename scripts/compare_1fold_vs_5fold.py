@@ -3,6 +3,7 @@
 Compare predictions 1-fold vs 5-fold ensemble sur les images test_cropped.
 Trouve les images mieux classifiées par l'ensemble 5 folds.
 """
+import os
 import time
 from pathlib import Path
 from collections import Counter
@@ -14,9 +15,17 @@ import timm
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).parents[1]
+load_dotenv(ROOT / ".env")
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
-ONEDRIVE = Path("/Users/fredericdelabot/Library/CloudStorage/OneDrive-Personnel/BloodCellCaches")
+if not os.getenv("ONEDRIVE_CACHE_DIR"):
+    raise EnvironmentError(
+        "ONEDRIVE_CACHE_DIR doit être défini dans ton .env local (chemin personnel)."
+    )
+ONEDRIVE = Path(os.environ["ONEDRIVE_CACHE_DIR"])
 TEST_DIR     = ONEDRIVE / "MendereyAmeliore" / "test_cropped"
 CROSSVAL_DIR = ONEDRIVE / "DL_crossval_ameliorees"
 PRED_1FOLD   = ONEDRIVE / "Rapports" / "predictions_test_full.xlsx"

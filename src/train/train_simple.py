@@ -4,6 +4,7 @@ Sauvegarde les .pth dans reports/Fred_DL_pipeline_report_full/
 """
 
 import json
+import os
 import random
 import time
 import warnings
@@ -18,18 +19,19 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
+from dotenv import load_dotenv
 
 warnings.filterwarnings("ignore")
+ROOT = Path(__file__).parents[2]
+load_dotenv(ROOT / ".env")
 
 # ── Config ─────────────────────────────────────────────────────────────
-DATA_DIR = Path(
-    "/Users/fredericdelabot/Documents/DataScientest/Projet CHU Lyon"
-    "/mendeley/1/PBC_dataset_normal_DIB"
-)
-OUTPUT_DIR = (
-    Path(__file__).parent.parent.parent
-    / "reports/Fred_DL_pipeline_report_full"
-)
+if not os.getenv("MENDELEY_RAW_DIR"):
+    raise EnvironmentError(
+        "MENDELEY_RAW_DIR doit être défini dans ton .env local (chemin personnel)."
+    )
+DATA_DIR = Path(os.environ["MENDELEY_RAW_DIR"])
+OUTPUT_DIR = ROOT / "reports" / "Fred_DL_pipeline_report_full"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 EXPECTED_CLASSES = {

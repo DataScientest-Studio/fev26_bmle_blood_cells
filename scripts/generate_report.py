@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -377,6 +379,6 @@ doc.add_paragraph(
 )
 
 # ── Save ──────────────────────────────────────────────────────────────────────
-out = "/Users/romanebeaurepere/Documents/fev26_bmle_blood_cells/rapport_livrables.docx"
+out = Path(__file__).parents[1] / "rapport_livrables.docx"
 doc.save(out)
 print(f"Rapport généré : {out}")
