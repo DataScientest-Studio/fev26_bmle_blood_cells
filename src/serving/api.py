@@ -83,52 +83,61 @@ transform = transforms.Compose([
 ])
 
 
+MLFLOW_MODEL_NAME = "blood-cell-densenet121"
+
+
+def _load_from_registry():
+    """Charge le modèle @production depuis le MLflow Registry."""
+    import mlflow
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    mlflow.set_tracking_uri(tracking_uri)
+    model_uri = f"models:/{MLFLOW_MODEL_NAME}@production"
+    loaded = mlflow.pytorch.load_model(model_uri, map_location=DEVICE)
+    loaded = loaded.to(DEVICE)
+    loaded.eval()
+    print(f"[MLflow] Modèle chargé : {model_uri}")
+    return loaded
+
+
+def _load_from_file():
+    """Charge le modèle depuis un .pth local (fallback)."""
+    model_paths = [
+        "models/best_densenet121.pth",
+        "models/best_DenseNet_121.pth",
+        "/app/models/best_densenet121.pth",
+        "/app/models/best_DenseNet_121.pth",
+    ]
+    model_path = next((p for p in model_paths if os.path.exists(p)), None)
+    if model_path is None:
+        raise FileNotFoundError(f"Modèle introuvable. Chemins testés : {model_paths}")
+
+    checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=True)
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    num_classes_ckpt = state_dict["classifier.weight"].shape[0]
+
+    m = densenet121(weights=None)
+    m.classifier = nn.Linear(m.classifier.in_features, num_classes_ckpt)
+    m.load_state_dict(state_dict)
+    m = m.to(DEVICE)
+    m.eval()
+    print(f"[Fallback] Modèle chargé depuis fichier : {model_path}")
+    return m
+
+
 def load_model():
-    """Charge le modèle DenseNet-121 une seule fois"""
+    """Charge le modèle — MLflow Registry @production en priorité, .pth local en fallback."""
     global model, model_device
 
     if model is not None:
         return model
 
-    # Chemins où chercher le modèle (en ordre de priorité)
-    model_paths = [
-        "models/best_densenet121.pth",       # modèle entraîné via training.py (8 classes)
-        "models/best_DenseNet_121.pth",       # modèle DagsHub
-        "/app/models/best_densenet121.pth",
-        "/app/models/best_DenseNet_121.pth",
-        "reports/pour_mac/best_DenseNet_121.pth",
-    ]
+    try:
+        model = _load_from_registry()
+    except Exception as exc:
+        print(f"[warn] MLflow Registry indisponible ({exc}) — fallback .pth local")
+        model = _load_from_file()
 
-    model_path = None
-    for path in model_paths:
-        if os.path.exists(path):
-            model_path = path
-            print(f"Model found at: {model_path}")
-            break
-
-    if model_path is None:
-        raise FileNotFoundError(
-            f"Model not found. Searched in: {', '.join(model_paths)}"
-        )
-
-    # Détecter le nombre de classes depuis le checkpoint
-    checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=True)
-    state_dict = checkpoint.get("model_state_dict", checkpoint)
-    num_classes_ckpt = state_dict["classifier.weight"].shape[0]
-
-    if num_classes_ckpt != NUM_CLASSES:
-        print(
-            f"Warning: checkpoint has {num_classes_ckpt} classes, "
-            f"CLASSES list has {NUM_CLASSES} — using checkpoint size"
-        )
-
-    model = densenet121(weights=None)
-    model.classifier = nn.Linear(model.classifier.in_features, num_classes_ckpt)
-    model.load_state_dict(state_dict)
-    model = model.to(DEVICE)
-    model.eval()
     model_device = DEVICE
-
     return model
 
 

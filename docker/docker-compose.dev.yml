@@ -101,6 +101,61 @@ services:
       retries: 3
       start_period: 10s
 
+  # ═══════════════════════════════════════════════════════════════════
+  # 4️⃣ PREPROCESSING — Téléchargement et préparation des données (one-shot)
+  # Usage : docker compose -f docker/docker-compose.dev.yml run --rm preprocessing
+  # ═══════════════════════════════════════════════════════════════════
+  preprocessing:
+    build:
+      context: ..
+      dockerfile: docker/preprocessing/Dockerfile
+    container_name: blood_cell_preprocessing
+    volumes:
+      - ../data:/app/data
+      - ../.dvc:/app/.dvc
+    environment:
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+      - DAGSHUB_REPO_OWNER=${DAGSHUB_REPO_OWNER}
+      - DAGSHUB_REPO=${DAGSHUB_REPO}
+    profiles:
+      - tools
+    networks:
+      - ml_network
+
+  # ═══════════════════════════════════════════════════════════════════
+  # 5️⃣ TRAINING — Entraînement DenseNet-121 one-shot avec MLflow
+  # Usage : docker compose -f docker/docker-compose.dev.yml run --rm training
+  # Override : docker compose run -e EPOCHS_HEAD=3 -e EPOCHS_FULL=5 training
+  # ═══════════════════════════════════════════════════════════════════
+  training:
+    build:
+      context: ..
+      dockerfile: docker/training/Dockerfile
+    container_name: blood_cell_training
+    volumes:
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../mlruns:/app/mlruns
+      - ../logs:/app/logs
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DAGSHUB_USER=${DAGSHUB_USER}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+      - DATA_DIR=data/raw
+      - OUTPUT_DIR=models
+      - EPOCHS_HEAD=5
+      - EPOCHS_FULL=10
+      - BATCH_SIZE=32
+      - RUN_TYPE=base
+      - PART=0
+    depends_on:
+      - mlflow
+    profiles:
+      - tools
+    networks:
+      - ml_network
+
 networks:
   ml_network:
     driver: bridge
