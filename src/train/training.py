@@ -214,7 +214,13 @@ def _get_git_commit() -> str:
 def _setup_mlflow():
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("bloodcells-densenet121")
+    client = MlflowClient()
+    exp_name = "bloodcells-densenet121"
+    if client.get_experiment_by_name(exp_name) is None:
+        # mlflow-artifacts:/ force le mode proxy (--serve-artifacts côté serveur)
+        # nécessaire pour logger des artifacts depuis l'hôte vers le container Docker
+        client.create_experiment(exp_name, artifact_location="mlflow-artifacts:/")
+    mlflow.set_experiment(exp_name)
 
 
 def _register_and_promote(run_id: str, metrics: dict) -> None:
@@ -457,6 +463,7 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
     metrics = {
         "best_val_acc": best_val_acc,
         "test_acc":     test_acc,
+        "run_id":       run.info.run_id,
         **test_metrics,
         "history": history,
         "config":  {k: v for k, v in cfg.items()},

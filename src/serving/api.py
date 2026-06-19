@@ -9,6 +9,7 @@ Lancement :
 import io
 import os
 import sys
+import time
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -187,10 +188,12 @@ async def predict(file: UploadFile = File(...)):
         image_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
         # Prédire
+        t0 = time.perf_counter()
         with torch.no_grad():
             outputs = model(image_tensor)
             probs = torch.softmax(outputs, dim=1)
             confidence, pred_class = torch.max(probs, 1)
+        inference_ms = round((time.perf_counter() - t0) * 1000, 1)
 
         # Préparer la réponse
         pred_idx = pred_class.item()
@@ -201,9 +204,12 @@ async def predict(file: UploadFile = File(...)):
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
         return {
-            "class": pred_label,
+            "predicted_class": pred_label,
             "confidence": round(pred_confidence, 3),
-            "all_probas": all_probas
+            "is_critical": pred_label.lower() in {"erythroblast", "ig"},
+            "inference_ms": inference_ms,
+            "top3": sorted(all_probas.items(), key=lambda x: x[1], reverse=True)[:3],
+            "all_probas": all_probas,
         }
 
     except Exception as e:
@@ -276,6 +282,7 @@ async def run_training(params: TrainingParams = TrainingParams()):
             "status": "ok",
             "val_acc": round(metrics["best_val_acc"], 4),
             "test_acc": round(metrics["test_acc"], 4),
+            "mlflow_run_id": metrics.get("run_id", ""),
             "model_path": str(output_dir / "best_densenet121.pth"),
         }
 

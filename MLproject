@@ -13,7 +13,7 @@ entry_points:
       part:        {type: int, default: 0}
       run_type:    {type: str, default: "base"}
     command: >
-      python -m src.train.training
+      .venv/bin/python -m src.train.training
       --data-dir {data_dir}
       --output-dir {output_dir}
       --epochs-head {epochs_head}
