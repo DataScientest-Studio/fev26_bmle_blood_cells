@@ -113,17 +113,19 @@ def main():
 
     # 3. État actuel
     add_heading(doc, "3. État actuel du Registry", level=1)
-    add_bullet(doc, "V0 enregistrée : versions 1 à 5, tag generation=v0 (référence).")
-    add_bullet(doc, "V1 — test de validation (2 folds, 6 epochs) effectué avec succès : "
-               "promu @production pour valider que toute la chaîne fonctionne (SSH → "
-               "entraînement → registry → promotion).")
-    add_bullet(doc, "Le run complet pour V1 (5 folds, 20 epochs, ~1h30-2h sur la RTX 4090) est "
-               "prévu le soir même, déclenché manuellement depuis Airflow.")
+    add_bullet(doc, "V0 enregistrée : versions 1 à 5, tag generation=v0 (référence, 5 folds "
+               "déjà entraînés précédemment).")
+    add_bullet(doc, "V1 — test de validation (2 folds, 6 epochs) effectué avec succès cet "
+               "après-midi : promu @production pour valider que toute la chaîne fonctionne "
+               "(SSH → entraînement → registry → promotion).")
+    add_bullet(doc, "Run complet V1 (5 folds, 20 epochs, ~1h30-2h sur la RTX 4090) lancé le "
+               "soir même depuis Airflow — remplacera automatiquement la version @production "
+               "si ses résultats sont au moins aussi bons (garde-fou décrit en 2.3).")
 
     # 4. Bugs corrigés
     add_heading(doc, "4. Problèmes préexistants corrigés au passage", level=1)
     doc.add_paragraph(
-        "Trois bugs ont été découverts en testant cette chaîne pour la première fois — "
+        "Plusieurs bugs ont été découverts en testant cette chaîne pour la première fois — "
         "aucun n'est lié au travail d'aujourd'hui, ils bloquaient déjà silencieusement "
         "certaines fonctionnalités :"
     )
@@ -135,9 +137,33 @@ def main():
                "--artifacts-destination : ça empêchait register_model() de fonctionner pour "
                "tout client hors du conteneur (y compris depuis le Mac lui-même) — aucune "
                "promotion de modèle n'aurait jamais pu fonctionner.")
+    add_bullet(doc, "models/.gitkeep était suivi par git en parallèle de models.dvc : DVC "
+               "refusait de retracker le dossier tant que ce conflit existait, bloquant aussi "
+               "silencieusement toute mise à jour du modèle vers le datalake.")
 
-    # 5. Sécurité
-    add_heading(doc, "5. Sécurité — accès partagé avec Romane et Sara", level=1)
+    # 5. Automatisation datalake + inférence
+    add_heading(doc, "5. Automatisation : datalake DagsHub et conteneurs d'inférence", level=1)
+    doc.add_paragraph(
+        "Nouvelle tâche sync_to_datalake, exécutée automatiquement après chaque promotion "
+        "@production confirmée :"
+    )
+    add_bullet(doc, "Téléchargement du modèle @production courant depuis le MLflow Registry.")
+    add_bullet(doc, "dvc add + dvc push vers DagsHub (le datalake partagé de l'équipe) — "
+               "models/best_DenseNet_121.pth contient maintenant les poids réellement servis "
+               "en production, plus l'ancien modèle du 12 juin.")
+    add_bullet(doc, "git commit + push automatique de models.dvc sur GitHub (token dédié, "
+               "scope repo uniquement — voir section sécurité).")
+    add_bullet(doc, "Redémarrage automatique de blood_cell_api / blood_cell_streamlit s'ils "
+               "tournent, pour qu'ils rechargent le nouveau modèle (le chargement ne se fait "
+               "qu'au démarrage du conteneur, jamais à chaud).")
+    doc.add_paragraph(
+        "Nécessite : un Dockerfile dédié pour Airflow (git, dvc, torch CPU, timm) et le socket "
+        "Docker du Mac monté dans le conteneur Airflow (pour pouvoir redémarrer les conteneurs "
+        "d'inférence)."
+    )
+
+    # 6. Sécurité
+    add_heading(doc, "6. Sécurité — accès partagé avec Romane et Sara", level=1)
     doc.add_paragraph(
         "Avant cette mise en place, Airflow/MLflow n'étaient accessibles que depuis le Mac "
         "lui-même. Pour donner accès à Romane et Sara sans exposer le PC Windows ni donner un "
@@ -146,14 +172,19 @@ def main():
         "elles n'ont accès qu'au Mac, uniquement aux interfaces web Airflow et MLflow. Voir le "
         "guide de connexion séparé pour le détail."
     )
-    add_bullet(doc, "Recommandé avant le partage effectif : changer le mot de passe admin/admin "
-               "d'Airflow (actuellement le défaut de la doc officielle).")
+    add_bullet(doc, "Mot de passe admin/admin d'Airflow changé (n'était que le défaut de la "
+               "doc officielle) — nouveau mot de passe donné dans le guide de connexion.")
+    add_bullet(doc, "Token GitHub dédié au push automatique : classique, scope repo "
+               "uniquement (pas admin:org) — minimise le risque en cas de fuite depuis le "
+               "conteneur.")
 
-    # 6. Suite
-    add_heading(doc, "6. Prochaines étapes", level=1)
-    add_bullet(doc, "Lancement du run complet (5 folds, 20 epochs) le soir même.")
-    add_bullet(doc, "Vérifier le lendemain que la version est bien promue @production et "
-               "regarder les métriques par classe (recall_platelet en particulier).")
+    # 7. Suite
+    add_heading(doc, "7. Prochaines étapes", level=1)
+    add_bullet(doc, "Run complet V1 en cours ce soir — vérifier le lendemain que la version "
+               "est bien promue @production et regarder les métriques par classe "
+               "(recall_platelet en particulier).")
+    add_bullet(doc, "Confirmer que le commit/push automatique de models.dvc s'est bien fait "
+               "sur GitHub après la promotion.")
     add_bullet(doc, "À discuter en équipe : intégrer une source de données \"autre instrument\" "
                "(archive TCIA, format TIFF) pour les générations suivantes — limitation connue : "
                "cette source ne couvre que 7 classes sur 8 (pas de plaquettes).")

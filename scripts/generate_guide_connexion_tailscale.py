@@ -20,9 +20,12 @@ ROOT = Path(__file__).parents[1]
 load_dotenv(ROOT / ".env")
 OUT = ROOT / "reports" / "Fred" / "guide_connexion_tailscale.docx"
 
-if not os.getenv("MAC_TAILSCALE_IP"):
-    raise EnvironmentError("MAC_TAILSCALE_IP doit être défini dans ton .env local.")
+if not os.getenv("MAC_TAILSCALE_IP") or not os.getenv("AIRFLOW_ADMIN_PASSWORD"):
+    raise EnvironmentError(
+        "MAC_TAILSCALE_IP et AIRFLOW_ADMIN_PASSWORD doivent être définis dans ton .env local."
+    )
 MAC_IP = os.environ["MAC_TAILSCALE_IP"]
+AIRFLOW_PASSWORD = os.environ["AIRFLOW_ADMIN_PASSWORD"]
 
 
 def add_heading(doc, text, level=1):
@@ -94,7 +97,7 @@ def main():
     # Étape 2
     add_heading(doc, "Étape 2 — Ouvrir Airflow (suivre / déclencher les entraînements)", level=1)
     add_code(doc, f"http://{MAC_IP}:8080")
-    doc.add_paragraph("Identifiants : à demander à Fred (pas admin/admin par défaut).")
+    doc.add_paragraph(f"Identifiants : admin / {AIRFLOW_PASSWORD}")
     add_bullet(doc, "Dans la liste des DAGs, ouvrir blood_cell_training_pipeline.")
     add_bullet(doc, "Vue \"Grid\" : historique des exécutions, statut de chaque tâche (verte = "
                "réussie, rouge = échouée, jaune/en cours = en cours).")
@@ -112,6 +115,9 @@ def main():
     add_bullet(doc, "Suivre la progression via les logs de train_model. Le résultat final "
                "(modèle promu en production, ou pas) apparaît ensuite dans la tâche "
                "check_promotion.")
+    add_bullet(doc, "Si le modèle est promu, tout se fait automatiquement derrière : "
+               "sauvegarde sur DagsHub, mise à jour sur GitHub, et redémarrage de "
+               "l'application pour qu'elle utilise le nouveau modèle. Rien à faire de plus.")
     doc.add_paragraph(
         "À savoir : un entraînement complet prend environ 1h30 à 2h. Le PC Windows étant "
         "aussi utilisé pour jouer, éviter de lancer un entraînement en même temps qu'une "
