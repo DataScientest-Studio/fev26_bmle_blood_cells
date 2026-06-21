@@ -192,3 +192,4 @@ data/.*_version
 
 # Fichiers temporaires de génération
 generate_reorganisation_doc.py
+/models
