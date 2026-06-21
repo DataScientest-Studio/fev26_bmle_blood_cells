@@ -1,21 +1,32 @@
 """
 DAG Airflow — Pipeline d'entraînement Blood Cell Classifier
 Planification : chaque dimanche à 2h00
+
+L'entraînement (cross-validation 5-fold DenseNet-121) tourne à distance sur le
+PC Windows (GPU) via SSH/Tailscale — le conteneur Airflow ne fait
+qu'orchestrer. Le script distant (src/train/dl_crossval_train.py) enregistre
+lui-même la meilleure version dans le MLflow Model Registry et décide de la
+promotion @production ; ce DAG se contente ensuite de vérifier le résultat.
 """
 
+import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.operators.python import BranchPythonOperator, PythonOperator
+from airflow.operators.python import BranchPythonOperator
+from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.utils.trigger_rule import TriggerRule
 
-import mlflow
 from mlflow.tracking import MlflowClient
+import mlflow
 
-MLFLOW_TRACKING_URI = "http://mlflow:5000"
-MODEL_NAME = "blood_cell_densenet121"
-PROJECT_DIR = "/opt/airflow/project"
+MLFLOW_TRACKING_URI = "http://mlflow:5000"  # depuis le conteneur Airflow
+MAC_MLFLOW_TAILSCALE_URI = f"http://{os.environ['MAC_TAILSCALE_IP']}:5001"  # depuis le PC Windows
+MODEL_NAME = "blood-cell-densenet121"
+WINDOWS_SSH_CONN_ID = "ssh_windows_gpu"
+WINDOWS_REPO_DIR = os.environ["WINDOWS_REPO_DIR"]
+GENERATION = "v1"  # à incrémenter (v2, v3...) à chaque nouveau cycle de données
 
 default_args = {
     "owner": "romane",
@@ -27,7 +38,7 @@ default_args = {
 
 dag = DAG(
     dag_id="blood_cell_training_pipeline",
-    description="Entraînement planifié + comparaison + promotion du meilleur modèle",
+    description="Entraînement distant (Windows GPU) + vérification de la promotion du meilleur modèle",
     schedule_interval="0 2 * * 0",  # chaque dimanche à 2h
     start_date=datetime(2026, 6, 17),
     catchup=False,
@@ -36,75 +47,58 @@ dag = DAG(
 )
 
 
-# ── Task 1 : Entraînement ─────────────────────────────────────────────────────
-train = BashOperator(
+# ── Task 1 : Entraînement distant sur le PC Windows (GPU) via SSH ────────────
+train = SSHOperator(
     task_id="train_model",
-    bash_command=(
-        f"cd {PROJECT_DIR} && "
-        "python -m src.train.training "
-        "--data-dir data/raw "
-        "--epochs-head 5 "
-        "--epochs-full 10"
+    ssh_conn_id=WINDOWS_SSH_CONN_ID,
+    cmd_timeout=None,
+    command=(
+        "powershell -NoProfile -Command \""
+        f"$env:MLFLOW_TRACKING_URI='{MAC_MLFLOW_TAILSCALE_URI}'; "
+        "$env:PYTHONUTF8='1'; "
+        f"cd '{WINDOWS_REPO_DIR}'; "
+        "& '.venv\\Scripts\\python.exe' -m src.train.dl_crossval_train "
+        f"--generation {GENERATION}"
+        "\""
     ),
     dag=dag,
 )
 
 
-# ── Task 2 : Comparer nouvelle version vs champion actuel ─────────────────────
-def _compare_and_promote(**context):
+# ── Task 2 : Vérifier si la nouvelle génération a été promue @production ─────
+def _check_promotion(**context):
+    """Le script distant a déjà décidé de la promotion (garde-fou macro_f1 +
+    recall sur les 8 classes). Cette tâche ne fait qu'observer le résultat
+    dans le Registry pour piloter la branche du DAG."""
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     client = MlflowClient()
 
-    # Dernière run enregistrée
-    runs = mlflow.search_runs(
-        experiment_names=["blood_cell_classification"],
-        order_by=["start_time DESC"],
-        max_results=1,
-    )
-    if runs.empty:
-        raise ValueError("Aucun run MLflow trouvé après l'entraînement.")
-
-    new_run = runs.iloc[0]
-    new_accuracy = new_run.get("metrics.val_acc", 0)
-    new_run_id = new_run["run_id"]
-
-    # Champion actuel dans le Registry
-    champion_accuracy = 0.0
     try:
-        champion = client.get_model_version_by_alias(MODEL_NAME, "champion")
-        champion_run = client.get_run(champion.run_id)
-        champion_accuracy = champion_run.data.metrics.get("val_acc", 0)
+        prod_mv = client.get_model_version_by_alias(MODEL_NAME, "production")
     except Exception:
-        pass  # Pas encore de champion enregistré
-
-    print(f"Nouveau modèle : val_acc={new_accuracy:.4f}")
-    print(f"Champion actuel : val_acc={champion_accuracy:.4f}")
-
-    if new_accuracy >= champion_accuracy:
-        # Enregistrer dans le Registry et promouvoir
-        mv = mlflow.register_model(
-            model_uri=f"runs:/{new_run_id}/model",
-            name=MODEL_NAME,
-        )
-        client.set_registered_model_alias(MODEL_NAME, "champion", mv.version)
-        print(f"Nouveau champion : version {mv.version} (val_acc={new_accuracy:.4f})")
-        return "promote_success"
-    else:
-        print("Le modèle actuel reste champion.")
+        print("Aucune version @production trouvée dans le Registry.")
         return "no_promotion"
 
+    if prod_mv.tags.get("generation") == GENERATION:
+        print(f"@production = version {prod_mv.version} (generation={GENERATION}) — promotion confirmée.")
+        return "promote_success"
 
-compare = BranchPythonOperator(
-    task_id="compare_and_promote",
-    python_callable=_compare_and_promote,
+    print(f"@production reste version {prod_mv.version} "
+          f"(generation={prod_mv.tags.get('generation')}) — {GENERATION} non promue.")
+    return "no_promotion"
+
+
+check_promotion = BranchPythonOperator(
+    task_id="check_promotion",
+    python_callable=_check_promotion,
     dag=dag,
 )
 
 
-# ── Task 3a : Promotion réussie ───────────────────────────────────────────────
+# ── Task 3a : Promotion confirmée ─────────────────────────────────────────────
 promote_success = BashOperator(
     task_id="promote_success",
-    bash_command='echo "Nouveau modèle promu champion dans MLflow Registry."',
+    bash_command=f'echo "Génération {GENERATION} promue @production dans MLflow Registry."',
     dag=dag,
 )
 
@@ -112,12 +106,12 @@ promote_success = BashOperator(
 # ── Task 3b : Pas de promotion ────────────────────────────────────────────────
 no_promotion = BashOperator(
     task_id="no_promotion",
-    bash_command='echo "Champion inchangé — nouveau modèle archivé."',
+    bash_command=f'echo "Génération {GENERATION} reste @challenger — @production inchangé."',
     dag=dag,
 )
 
 
-# ── Task 4 : Fin (toujours exécutée) ─────────────────────────────────────────
+# ── Task 4 : Fin (toujours exécutée) ──────────────────────────────────────────
 done = BashOperator(
     task_id="pipeline_done",
     bash_command='echo "Pipeline blood_cell_training_pipeline terminé."',
@@ -126,5 +120,5 @@ done = BashOperator(
 )
 
 
-# ── Dépendances ───────────────────────────────────────────────────────────────
-train >> compare >> [promote_success, no_promotion] >> done
+# ── Dépendances ────────────────────────────────────────────────────────────────
+train >> check_promotion >> [promote_success, no_promotion] >> done
