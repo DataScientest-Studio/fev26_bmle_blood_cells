@@ -33,6 +33,10 @@ x-airflow-common: &airflow-common
     - ../mlruns:/opt/airflow/project/mlruns
     - ~/.ssh/airflow_to_windows:/opt/airflow/keys/airflow_to_windows:ro
     - /var/run/docker.sock:/var/run/docker.sock   # pour redémarrer api/streamlit après promotion
+    # Même chemin absolu des deux côtés : les symlinks de data/tiff_batches/
+    # (créés par scripts/split_tiff_batches.py) pointent vers ce dossier et
+    # ne résolvent que si le chemin existe à l'identique dans le conteneur.
+    - ${CANCER_ARCHIVE_DIR}:${CANCER_ARCHIVE_DIR}:ro
   depends_on:
     airflow-db:
       condition: service_healthy

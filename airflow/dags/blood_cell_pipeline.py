@@ -10,7 +10,6 @@ promotion @production ; ce DAG se contente ensuite de vérifier le résultat.
 """
 
 import os
-import subprocess
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -22,14 +21,12 @@ from airflow.utils.trigger_rule import TriggerRule
 from mlflow.tracking import MlflowClient
 import mlflow
 
-MLFLOW_TRACKING_URI = "http://mlflow:5000"  # depuis le conteneur Airflow
+from _common import MLFLOW_TRACKING_URI, MODEL_NAME, supabase_env_exports, sync_to_datalake
+
 MAC_MLFLOW_TAILSCALE_URI = f"http://{os.environ['MAC_TAILSCALE_IP']}:5001"  # depuis le PC Windows
-MODEL_NAME = "blood-cell-densenet121"
 WINDOWS_SSH_CONN_ID = "ssh_windows_gpu"
 WINDOWS_REPO_DIR = os.environ["WINDOWS_REPO_DIR"]
-GENERATION = "v1"  # à incrémenter (v2, v3...) à chaque nouveau cycle de données
-PROJECT_DIR = "/opt/airflow/project"
-INFERENCE_CONTAINERS = ("blood_cell_api", "blood_cell_streamlit")
+GENERATION = "v1"  # à incrémenter (v2, v3...) à chaque nouveau cycle de données complet (5-fold)
 
 default_args = {
     "owner": "romane",
@@ -55,11 +52,6 @@ dag = DAG(
 # script distant n'appelle pas load_dotenv() (pour éviter le piège du
 # MLFLOW_TRACKING_URI local — cf. supabase_logger.py) donc rien n'est chargé
 # automatiquement depuis un .env côté Windows (qui n'existe pas).
-_SUPABASE_ENV = "; ".join(
-    f"$env:{var}='{os.environ[var]}'"
-    for var in ("SUPABASE_HOST", "SUPABASE_PORT", "SUPABASE_DB", "SUPABASE_USER", "SUPABASE_PASSWORD")
-)
-
 train = SSHOperator(
     task_id="train_model",
     ssh_conn_id=WINDOWS_SSH_CONN_ID,
@@ -68,7 +60,7 @@ train = SSHOperator(
         "powershell -NoProfile -Command \""
         f"$env:MLFLOW_TRACKING_URI='{MAC_MLFLOW_TAILSCALE_URI}'; "
         "$env:PYTHONUTF8='1'; "
-        f"{_SUPABASE_ENV}; "
+        f"{supabase_env_exports()}; "
         f"cd '{WINDOWS_REPO_DIR}'; "
         "& '.venv\\Scripts\\python.exe' -m src.train.dl_crossval_train "
         f"--generation {GENERATION}"
@@ -127,53 +119,9 @@ no_promotion = BashOperator(
 # ── Task 4 : Synchroniser le modèle @production vers le datalake DVC/DagsHub,
 #             committer+pousser models.dvc sur GitHub, puis redémarrer les
 #             conteneurs d'inférence pour qu'ils chargent la nouvelle version ──
-def _sync_to_datalake(**context):
-    import torch
-
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    client = MlflowClient()
-    prod_mv = client.get_model_version_by_alias(MODEL_NAME, "production")
-
-    model = mlflow.pytorch.load_model(f"models:/{MODEL_NAME}@production", map_location="cpu")
-    torch.save(model.state_dict(), f"{PROJECT_DIR}/models/best_DenseNet_121.pth")
-    print(f"Poids v{prod_mv.version} écrits dans models/best_DenseNet_121.pth")
-
-    def run(cmd, redact=None):
-        shown = [c if c != redact else "***" for c in cmd] if redact else cmd
-        print(f"$ {' '.join(shown)}")
-        subprocess.run(cmd, cwd=PROJECT_DIR, check=True)
-
-    run(["dvc", "add", "models"])
-    run(["dvc", "push"])
-    run(["git", "config", "user.email", "airflow@bloodcells.local"])
-    run(["git", "config", "user.name", "Airflow (auto)"])
-    run(["git", "add", "models.dvc"])
-
-    generation = prod_mv.tags.get("generation", "?")
-    commit_msg = f"Auto : promotion DenseNet-121 v{prod_mv.version} (generation={generation}) vers le datalake"
-    commit_result = subprocess.run(["git", "commit", "-m", commit_msg], cwd=PROJECT_DIR)
-    if commit_result.returncode != 0:
-        print("Rien à committer (models.dvc déjà à jour) — pas de push.")
-    else:
-        token = os.environ["GITHUB_TOKEN"]
-        remote_url = subprocess.run(
-            ["git", "remote", "get-url", "origin"], cwd=PROJECT_DIR, check=True, capture_output=True, text=True,
-        ).stdout.strip()
-        push_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
-        run(["git", "push", push_url, "HEAD:main"], redact=push_url)
-        print(f"Pushé sur GitHub : {commit_msg}")
-
-    for name in INFERENCE_CONTAINERS:
-        result = subprocess.run(["docker", "restart", name], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"{name} redémarré — charge maintenant v{prod_mv.version}.")
-        else:
-            print(f"{name} non redémarré (probablement pas lancé) : {result.stderr.strip()}")
-
-
-sync_to_datalake = PythonOperator(
+sync = PythonOperator(
     task_id="sync_to_datalake",
-    python_callable=_sync_to_datalake,
+    python_callable=sync_to_datalake,
     dag=dag,
 )
 
@@ -189,5 +137,5 @@ done = BashOperator(
 
 # ── Dépendances ────────────────────────────────────────────────────────────────
 train >> check_promotion >> [promote_success, no_promotion]
-promote_success >> sync_to_datalake >> done
+promote_success >> sync >> done
 no_promotion >> done
