@@ -524,7 +524,7 @@ if __name__ == "__main__":
 
         client = MlflowClient()
 
-        with mlflow.start_run(run_name=f"{model_key}_best_fold{fold_num}_{generation}") as run:
+        with mlflow.start_run(run_name=f"{model_key}_best_fold{fold_num}_{generation}"):
             mlflow.log_params({
                 "model": model_key, "fold": fold_num, "generation": generation,
                 "n_train": int(best_row["n_train"]), "n_val": int(best_row["n_val"]),

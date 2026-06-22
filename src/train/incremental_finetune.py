@@ -27,7 +27,6 @@ Usage :
 """
 
 import argparse
-import json
 import os
 import random
 import time
@@ -38,16 +37,12 @@ from pathlib import Path
 import mlflow
 import mlflow.pytorch
 import numpy as np
-import timm
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from mlflow.tracking import MlflowClient
 from PIL import Image
-from sklearn.metrics import (
-    accuracy_score, confusion_matrix, f1_score,
-    precision_recall_fscore_support, recall_score,
-)
+from sklearn.metrics import accuracy_score, f1_score, recall_score
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -198,8 +193,10 @@ def main():
     batch_dir = Path(args.batch_dir)
     if not batch_dir.is_absolute():
         batch_dir = PROJECT_ROOT / batch_dir
-    reference_dir = Path(args.reference_dir) if args.reference_dir else PROJECT_ROOT / "data" / "crossval_source" / "test_cropped"
-    replay_dir = Path(args.replay_dir) if args.replay_dir else PROJECT_ROOT / "data" / "crossval_source" / "train_final"
+    default_reference = PROJECT_ROOT / "data" / "crossval_source" / "test_cropped"
+    reference_dir = Path(args.reference_dir) if args.reference_dir else default_reference
+    default_replay = PROJECT_ROOT / "data" / "crossval_source" / "train_final"
+    replay_dir = Path(args.replay_dir) if args.replay_dir else default_replay
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -298,8 +295,10 @@ def main():
                 tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
                 vl_loss, vl_acc = evaluate(model, val_loader, criterion, device)
                 scheduler.step()
-                mlflow.log_metrics({"train_loss": tr_loss, "val_loss": vl_loss,
-                                     "train_acc": tr_acc, "val_acc": vl_acc}, step=epoch)
+                mlflow.log_metrics(
+                    {"train_loss": tr_loss, "val_loss": vl_loss, "train_acc": tr_acc, "val_acc": vl_acc},
+                    step=epoch,
+                )
                 improved = vl_acc > best_val_acc
                 if improved:
                     best_val_acc = vl_acc
