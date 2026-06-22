@@ -1,0 +1,15 @@
+# Training container — dépendances pour entraînement DenseNet-121
+torch==2.11.0
+torchvision==0.26.0
+timm==1.0.26
+mlflow==3.11.1
+scikit-learn==1.8.0
+numpy==2.4.4
+pandas==2.3.3
+pillow==12.2.0
+matplotlib==3.10.8
+seaborn==0.13.2
+python-dotenv>=1.0.0
+pyyaml>=6.0
+psycopg2-binary>=2.9
+tqdm==4.67.3

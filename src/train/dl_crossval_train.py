@@ -5,9 +5,10 @@
 # 4 modèles × 5 folds = 20 entraînements
 # Dataset : train_final + val_cropped + test_cropped (Mendeley PBC 17k)
 
+import argparse
 from PIL import Image
 from sklearn.metrics import (
-    roc_auc_score, f1_score, accuracy_score
+    roc_auc_score, f1_score, accuracy_score, recall_score
 )
 from sklearn.model_selection import train_test_split, StratifiedKFold
 import timm
@@ -24,6 +25,7 @@ import pandas as pd
 import numpy as np
 import mlflow.pytorch
 import mlflow
+from mlflow.tracking import MlflowClient
 import os
 import json
 import random
@@ -70,8 +72,32 @@ if __name__ == "__main__":
             break
     print(f"Racine du projet : {PROJECT_ROOT}")
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data-dir", type=str,
+        default=os.environ.get("CROSSVAL_DATA_DIR", str(PROJECT_ROOT / "data" / "crossval_source")),
+        help="Dossier contenant train_final/, val_cropped/, test_cropped/",
+    )
+    parser.add_argument(
+        "--models", type=str, default="DenseNet-121",
+        help="Liste d'architectures séparées par des virgules (clés de MODELS_CONFIG)",
+    )
+    parser.add_argument(
+        "--generation", type=str, default="v1",
+        help="Tag de génération appliqué aux versions enregistrées dans le Model Registry",
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=20,
+        help="Nombre max d'epochs par fold (réduire pour un smoke test rapide)",
+    )
+    parser.add_argument(
+        "--folds", type=int, default=5,
+        help="Nombre de folds de la cross-validation (réduire pour un smoke test rapide)",
+    )
+    args = parser.parse_args()
+
     # Dossiers des images améliorées (Cellpose crop + augmentation)
-    _ML_BASE = Path(r"D:\BloodCellsProject\Mendeley\PBC_dataset_normal_DIB\output")
+    _ML_BASE = Path(args.data_dir)
     TRAIN_DIR = _ML_BASE / "train_final"
     VAL_DIR = _ML_BASE / "val_cropped"
     TEST_DIR = _ML_BASE / "test_cropped"
@@ -81,11 +107,21 @@ if __name__ == "__main__":
         "lymphocyte", "monocyte", "neutrophil", "platelet",
     ]
 
-    N_FOLDS = 5
+    MLFLOW_MODEL_NAME = "blood-cell-densenet121"
+    RECALL_TOLERANCE = 0.02
+
+    N_FOLDS = args.folds
 
     CFG = {
-        "output_dir": str(PROJECT_ROOT / "reports" / "Romane_DL_crossval_ameliorees"),
-        "num_epochs": 20,
+        # Le nombre de epochs n'entre PAS dans ce chemin : un run interrompu doit
+        # pouvoir reprendre via le mécanisme de checkpoint même si --epochs diffère
+        # légèrement. N_FOLDS, en revanche, change la composition même des folds
+        # (StratifiedKFold(n_splits=N) ne découpe pas pareil selon N) — un cache
+        # partagé entre deux valeurs de N_FOLDS rechargerait par erreur un modèle
+        # entraîné sur un découpage différent, juste parce que le numéro de fold
+        # coïncide.
+        "output_dir": str(PROJECT_ROOT / "reports" / f"Romane_DL_crossval_ameliorees_{args.folds}folds"),
+        "num_epochs": args.epochs,
         "batch_size": 32,
         "lr_head": 1e-3,
         "lr_full": 1e-4,
@@ -113,6 +149,12 @@ if __name__ == "__main__":
         "DenseNet-121": "#1D9E75",
         "ResNet-50": "#378ADD",
     }
+
+    requested_models = [m.strip() for m in args.models.split(",") if m.strip()]
+    unknown = [m for m in requested_models if m not in MODELS_CONFIG]
+    if unknown:
+        raise ValueError(f"Modèles inconnus dans --models : {unknown} (dispo : {list(MODELS_CONFIG)})")
+    MODELS_CONFIG = {k: v for k, v in MODELS_CONFIG.items() if k in requested_models}
 
     os.makedirs(CFG["output_dir"], exist_ok=True)
 
@@ -341,7 +383,7 @@ if __name__ == "__main__":
         PHASE1_EPOCHS = 5
         remaining = CFG["num_epochs"] - PHASE1_EPOCHS
 
-        mlflow.set_tracking_uri("mlruns")
+        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001"))
         mlflow.set_experiment("blood_cell_crossval_ameliorees")
         mlflow.start_run(run_name=f"{model_key}_fold{fold_num}")
         mlflow.log_params({
@@ -446,6 +488,84 @@ if __name__ == "__main__":
 
         return model, history
 
+    def register_and_promote_best_fold(model_key, df_model_results, generation):
+        """Enregistre le meilleur fold (macro_f1 max) dans le Model Registry,
+        tagué generation=<generation>. Promeut @production seulement si
+        macro_f1 ne régresse pas ET aucun recall par classe ne régresse
+        au-delà de RECALL_TOLERANCE (les 8 classes, pas seulement 2)."""
+        if model_key != "DenseNet-121":
+            print(f"  [SKIP registry] {model_key} non enregistré (registry réservé à DenseNet-121)")
+            return
+
+        best_row = df_model_results.loc[df_model_results["macro_f1"].idxmax()]
+        fold_num = int(best_row["fold"])
+        weights_path = Path(best_row["weights_path"])
+        recall_per_class = best_row["recall_per_class"]
+
+        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001"))
+        mlflow.set_experiment("blood_cell_crossval_ameliorees")
+
+        loaded = build_model(model_key, NUM_CLASSES, pretrained=False)
+        loaded.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+        loaded.eval()
+
+        client = MlflowClient()
+
+        with mlflow.start_run(run_name=f"{model_key}_best_fold{fold_num}_{generation}") as run:
+            mlflow.log_params({
+                "model": model_key, "fold": fold_num, "generation": generation,
+                "n_train": int(best_row["n_train"]), "n_val": int(best_row["n_val"]),
+                "n_test": int(best_row["n_test"]),
+            })
+            mlflow.set_tags({"generation": generation, "source": "dl_crossval_train"})
+            mlflow.log_metrics({
+                "accuracy": float(best_row["accuracy"]),
+                "macro_f1": float(best_row["macro_f1"]),
+                "weighted_f1": float(best_row["weighted_f1"]),
+                "auc_roc": float(best_row["auc_roc"]),
+                **{f"recall_{cls}": float(r) for cls, r in recall_per_class.items()},
+            })
+            input_size = MODELS_CONFIG[model_key]["input_size"]
+            model_info = mlflow.pytorch.log_model(
+                loaded, name="densenet121",
+                input_example=torch.zeros(1, 3, input_size, input_size).numpy(),
+                serialization_format="pickle",
+            )
+
+            mv = mlflow.register_model(model_uri=model_info.model_uri, name=MLFLOW_MODEL_NAME)
+            client.set_model_version_tag(MLFLOW_MODEL_NAME, mv.version, "generation", generation)
+            client.set_model_version_tag(MLFLOW_MODEL_NAME, mv.version, "fold", str(fold_num))
+
+            new_macro_f1 = float(best_row["macro_f1"])
+            try:
+                prod_mv = client.get_model_version_by_alias(MLFLOW_MODEL_NAME, "production")
+                prod_metrics = client.get_run(prod_mv.run_id).data.metrics
+                prod_macro_f1 = float(prod_metrics.get("macro_f1", 0.0))
+
+                regressions = []
+                for cls in CLASS_NAMES:
+                    prod_recall = float(prod_metrics.get(f"recall_{cls}", 0.0))
+                    new_recall = float(recall_per_class.get(cls, 0.0))
+                    if new_recall < prod_recall - RECALL_TOLERANCE:
+                        regressions.append(
+                            f"recall_{cls} {new_recall:.4f} < {prod_recall:.4f} - {RECALL_TOLERANCE}"
+                        )
+
+                if new_macro_f1 >= prod_macro_f1 and not regressions:
+                    client.set_registered_model_alias(MLFLOW_MODEL_NAME, "production", mv.version)
+                    print(f"  [ok] v{mv.version} -> @production "
+                          f"(macro_f1 {new_macro_f1:.4f} >= {prod_macro_f1:.4f})")
+                else:
+                    client.set_registered_model_alias(MLFLOW_MODEL_NAME, "challenger", mv.version)
+                    reasons = regressions[:]
+                    if new_macro_f1 < prod_macro_f1:
+                        reasons.insert(0, f"macro_f1 {new_macro_f1:.4f} < {prod_macro_f1:.4f}")
+                    print(f"  [KO] v{mv.version} reste @challenger : {' | '.join(reasons)}")
+
+            except mlflow.exceptions.MlflowException:
+                client.set_registered_model_alias(MLFLOW_MODEL_NAME, "production", mv.version)
+                print(f"  Premier modèle de production -> v{mv.version}")
+
     # ─────────────────────────────────────────────
     #  Cross-validation 5 folds
     # ─────────────────────────────────────────────
@@ -490,6 +610,9 @@ if __name__ == "__main__":
             acc = accuracy_score(y_true, y_pred)
             macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
             wt_f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+            recall_per_class = recall_score(
+                y_true, y_pred, average=None, labels=list(range(NUM_CLASSES)), zero_division=0
+            )
 
             y_true_1d = y_true.ravel()
             try:
@@ -497,6 +620,7 @@ if __name__ == "__main__":
             except ValueError:
                 auc = float("nan")
 
+            safe_key = model_key.replace("-", "_")
             all_fold_results.append({
                 "fold": fold_num,
                 "model": model_key,
@@ -504,11 +628,13 @@ if __name__ == "__main__":
                 "macro_f1": macro_f1,
                 "weighted_f1": wt_f1,
                 "auc_roc": auc,
+                "recall_per_class": dict(zip(CLASS_NAMES, recall_per_class.tolist())),
                 "n_train": len(idx_train),
                 "n_val": len(idx_val),
                 "n_test": len(idx_test),
                 "epochs": len(history["val_acc"]),
                 "elapsed_min": (time.time() - t_run_start) / 60,
+                "weights_path": str(fold_dir / f"best_fold{fold_num}_{safe_key}.pth"),
             })
 
             print(f"  FOLD {fold_num} | {model_key:<18} | "
@@ -529,6 +655,12 @@ if __name__ == "__main__":
 
     df_folds = pd.DataFrame(all_fold_results)
     df_folds.to_csv(Path(CFG["output_dir"]) / "crossval_results_per_fold.csv", index=False)
+
+    print(f"\nEnregistrement MLflow — generation={args.generation}")
+    for model_key in MODELS_CONFIG:
+        register_and_promote_best_fold(
+            model_key, df_folds[df_folds["model"] == model_key], args.generation
+        )
 
     metrics_cols = ["accuracy", "macro_f1", "weighted_f1", "auc_roc"]
     summary_rows = []

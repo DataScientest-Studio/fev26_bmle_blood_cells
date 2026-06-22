@@ -56,6 +56,20 @@
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/.env",
             "justMyCode": true
+        },
+        {
+            "name": "Lancer Streamlit (test authentification)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run", "src/serving/app.py",
+                "--server.port=8501"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
         }
     ]
 }

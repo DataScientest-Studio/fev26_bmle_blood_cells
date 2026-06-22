@@ -1,5 +1,7 @@
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9.1-python3.11
+  build:
+    context: .
+    dockerfile: Dockerfile
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
@@ -10,11 +12,17 @@ x-airflow-common: &airflow-common
     MLFLOW_TRACKING_URI: http://mlflow:5000
     DAGSHUB_USER: ${DAGSHUB_USER}
     DAGSHUB_TOKEN: ${DAGSHUB_TOKEN}
+    GITHUB_TOKEN: ${GITHUB_TOKEN}
     SUPABASE_HOST: ${SUPABASE_HOST}
     SUPABASE_PORT: ${SUPABASE_PORT}
     SUPABASE_DB: ${SUPABASE_DB}
     SUPABASE_USER: ${SUPABASE_USER}
     SUPABASE_PASSWORD: ${SUPABASE_PASSWORD}
+    MAC_TAILSCALE_IP: ${MAC_TAILSCALE_IP}
+    WINDOWS_REPO_DIR: ${WINDOWS_REPO_DIR}
+    AIRFLOW_CONN_SSH_WINDOWS_GPU: >-
+      {"conn_type": "ssh", "host": "${WINDOWS_TAILSCALE_IP}", "login": "${WINDOWS_SSH_USER}",
+      "extra": {"key_file": "/opt/airflow/keys/airflow_to_windows", "no_host_key_check": true, "conn_timeout": 30}}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -23,6 +31,8 @@ x-airflow-common: &airflow-common
     - ../models:/opt/airflow/project/models
     - ../data:/opt/airflow/project/data
     - ../mlruns:/opt/airflow/project/mlruns
+    - ~/.ssh/airflow_to_windows:/opt/airflow/keys/airflow_to_windows:ro
+    - /var/run/docker.sock:/var/run/docker.sock   # pour redémarrer api/streamlit après promotion
   depends_on:
     airflow-db:
       condition: service_healthy
