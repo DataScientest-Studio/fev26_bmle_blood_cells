@@ -12,8 +12,9 @@ import sys
 import time
 import torch
 import torch.nn as nn
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
@@ -85,6 +86,19 @@ transform = transforms.Compose([
 
 
 MLFLOW_MODEL_NAME = "blood-cell-densenet121"
+
+# ── Authentification API Key ─────────────────────────────────────────────────
+# Si API_SECRET_KEY n'est pas définie (dev local, CI), l'auth est désactivée.
+# En production (docker-compose), la variable DOIT être définie dans le .env.
+_API_SECRET_KEY = os.getenv("API_SECRET_KEY")
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def require_api_key(api_key: str = Security(_api_key_header)):
+    if _API_SECRET_KEY is None:
+        return  # auth désactivée si variable non configurée
+    if api_key != _API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Clé API invalide ou absente.")
 
 
 def _load_from_registry():
@@ -169,7 +183,7 @@ async def root():
     }
 
 
-@app.post("/predict", tags=["Inférence"])
+@app.post("/predict", tags=["Inférence"], dependencies=[Depends(require_api_key)])
 async def predict(file: UploadFile = File(...)):
     """
     Prédiction DL sur une image uploadée.
@@ -253,7 +267,7 @@ class TrainingParams(BaseModel):
     batch_size: Optional[int] = 32
 
 
-@app.post("/training", tags=["Entraînement"])
+@app.post("/training", tags=["Entraînement"], dependencies=[Depends(require_api_key)])
 async def run_training(params: TrainingParams = TrainingParams()):
     """
     Lance l'entraînement DenseNet-121 et retourne les métriques de base.

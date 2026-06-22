@@ -9,6 +9,10 @@ CellImagesSource/
 src/independent_scripts/outputs/
 outputs/
 
+# MLflow local (serveur de dev hors Docker)
+mlflow_artifacts/
+mlflow_local.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

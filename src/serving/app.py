@@ -22,6 +22,7 @@ load_dotenv(ROOT / ".env")
 from src.auth.users import verify_user  # noqa: E402
 
 API_URL = os.getenv("API_URL", "http://api:8000")
+API_SECRET_KEY = os.getenv("API_SECRET_KEY")
 
 CLASSES = [
     "Basophil",
@@ -48,6 +49,12 @@ CLASS_EMOJI = {
 }
 
 
+def _api_headers() -> dict:
+    if API_SECRET_KEY:
+        return {"X-API-Key": API_SECRET_KEY}
+    return {}
+
+
 def predict_with_api(image: Image.Image) -> dict:
     """Appelle l'API FastAPI pour prédire la classe d'une image."""
     try:
@@ -58,6 +65,7 @@ def predict_with_api(image: Image.Image) -> dict:
         response = requests.post(
             f"{API_URL}/predict",
             files={"file": ("image.png", img_bytes, "image/png")},
+            headers=_api_headers(),
             timeout=30
         )
 

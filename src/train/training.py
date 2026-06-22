@@ -230,9 +230,9 @@ def _get_dvc_hash(data_dir: Path) -> str:
 def _log_dataset_input(data_dir: Path, paths: list, labels: list, dvc_hash: str) -> None:
     """Lie la version DVC du dataset au run MLflow via mlflow.log_input()."""
     try:
-        from mlflow.data.filesystem_dataset_source import FileSystemDatasetSource
+        from mlflow.data.sources import LocalArtifactDatasetSource
         from mlflow.data.meta_dataset import MetaDataset
-        source = FileSystemDatasetSource(path=str(data_dir))
+        source = LocalArtifactDatasetSource(uri=str(data_dir.resolve()))
         dataset = MetaDataset(source=source, name=data_dir.name, digest=dvc_hash)
         mlflow.log_input(dataset, context="training")
     except Exception:

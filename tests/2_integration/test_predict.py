@@ -1,21 +1,29 @@
-"""Tests du pipeline de prédiction sur les images fixtures."""
+"""Tests d'intégration — pipeline de prédiction DenseNet-121.
+
+Ces tests chargent le vrai modèle .pth et vérifient l'intégralité du pipeline
+(chargement → prétraitement → inférence → softmax).
+Skippés automatiquement en CI si le fichier modèle est absent.
+"""
 import pytest
+import torch
+import torchvision.transforms as T
 from pathlib import Path
 from PIL import Image
 
-FIXTURES = Path(__file__).parent / "fixtures"
-MODELS_DIR = Path(__file__).parents[1] / "models"
+MODELS_DIR = Path(__file__).parents[3] / "models"
 MODEL_PATH = MODELS_DIR / "best_DenseNet_121.pth"
 CLASSES = ["basophil", "eosinophil", "erythroblast", "ig",
            "lymphocyte", "monocyte", "neutrophil", "platelet"]
 
 
+@pytest.mark.integration
 def test_model_file_exists():
     if not MODEL_PATH.exists():
         pytest.skip(f"Modèle non disponible en CI : {MODEL_PATH}")
     assert MODEL_PATH.exists()
 
 
+@pytest.mark.integration
 def test_metadata_exists():
     if not MODEL_PATH.exists():
         pytest.skip("Modèle non disponible en CI")
@@ -23,14 +31,12 @@ def test_metadata_exists():
     assert meta.exists(), "metadata.json introuvable"
 
 
-def test_predict_returns_8_classes():
-    import torch
+@pytest.mark.integration
+def test_predict_returns_8_classes(fixtures_dir):
     import timm
-    import torchvision.transforms as T
 
     if not MODEL_PATH.exists():
         pytest.skip("Modèle non disponible en CI")
-    pth = MODEL_PATH
 
     model = timm.create_model("densenet121", pretrained=False, num_classes=8)
     ckpt = torch.load(str(MODEL_PATH), map_location="cpu", weights_only=False)
@@ -38,7 +44,7 @@ def test_predict_returns_8_classes():
     model.load_state_dict(state)
     model.eval()
 
-    images = list(FIXTURES.glob("*.jpg"))
+    images = list(fixtures_dir.glob("*.jpg"))
     assert images
     img = Image.open(images[0]).convert("RGB")
 
