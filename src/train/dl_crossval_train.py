@@ -113,7 +113,14 @@ if __name__ == "__main__":
     N_FOLDS = args.folds
 
     CFG = {
-        "output_dir": str(PROJECT_ROOT / "reports" / "Romane_DL_crossval_ameliorees"),
+        # Le nombre de epochs n'entre PAS dans ce chemin : un run interrompu doit
+        # pouvoir reprendre via le mécanisme de checkpoint même si --epochs diffère
+        # légèrement. N_FOLDS, en revanche, change la composition même des folds
+        # (StratifiedKFold(n_splits=N) ne découpe pas pareil selon N) — un cache
+        # partagé entre deux valeurs de N_FOLDS rechargerait par erreur un modèle
+        # entraîné sur un découpage différent, juste parce que le numéro de fold
+        # coïncide.
+        "output_dir": str(PROJECT_ROOT / "reports" / f"Romane_DL_crossval_ameliorees_{args.folds}folds"),
         "num_epochs": args.epochs,
         "batch_size": 32,
         "lr_head": 1e-3,
