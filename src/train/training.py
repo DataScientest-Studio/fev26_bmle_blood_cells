@@ -211,6 +211,34 @@ def _get_git_commit() -> str:
         return "unknown"
 
 
+def _get_dvc_hash(data_dir: Path) -> str:
+    """Lit le hash MD5 DVC du dataset depuis le fichier .dvc correspondant."""
+    import yaml
+    candidates = list(ROOT.glob("data/*.dvc")) + list(ROOT.glob("data/runs/*.dvc"))
+    for dvc_file in candidates:
+        try:
+            manifest = yaml.safe_load(dvc_file.read_text())
+            out = manifest["outs"][0]
+            dvc_path = (ROOT / "data" / out["path"]).resolve()
+            if dvc_path == data_dir.resolve():
+                return out["md5"]
+        except Exception:
+            continue
+    return "unknown"
+
+
+def _log_dataset_input(data_dir: Path, paths: list, labels: list, dvc_hash: str) -> None:
+    """Lie la version DVC du dataset au run MLflow via mlflow.log_input()."""
+    try:
+        from mlflow.data.filesystem_dataset_source import FileSystemDatasetSource
+        from mlflow.data.meta_dataset import MetaDataset
+        source = FileSystemDatasetSource(path=str(data_dir))
+        dataset = MetaDataset(source=source, name=data_dir.name, digest=dvc_hash)
+        mlflow.log_input(dataset, context="training")
+    except Exception:
+        pass  # log_input optionnel — tags dvc_* suffisent pour la traçabilité
+
+
 def _setup_mlflow():
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(tracking_uri)
@@ -346,10 +374,16 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
         })
 
         # ── Tags ─────────────────────────────────────────────────────────────
+        dvc_hash = _get_dvc_hash(data_dir)
         mlflow.set_tags({
-            "git_commit": _get_git_commit(),
-            "run_type":   cfg.get("run_type", "base"),
+            "git_commit":       _get_git_commit(),
+            "run_type":         cfg.get("run_type", "base"),
+            "dvc_dataset_hash": dvc_hash,
+            "dataset_name":     data_dir.name,
         })
+
+        # ── Dataset versioning DVC → MLflow ──────────────────────────────────
+        _log_dataset_input(data_dir, paths, labels, dvc_hash)
 
         # ── Phase 1 : backbone gelé ──────────────────────────────────────────
         HEAD_NAMES = {"classifier", "head", "fc"}
