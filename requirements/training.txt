@@ -12,4 +12,6 @@ seaborn==0.13.2
 python-dotenv>=1.0.0
 pyyaml>=6.0
 psycopg2-binary>=2.9
+psutil>=5.9
+nvidia-ml-py>=12.0; sys_platform != "darwin"
 tqdm==4.67.3

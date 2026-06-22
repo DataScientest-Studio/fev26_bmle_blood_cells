@@ -51,6 +51,15 @@ dag = DAG(
 
 
 # ── Task 1 : Entraînement distant sur le PC Windows (GPU) via SSH ────────────
+# Supabase n'est joignable qu'en passant ses identifiants explicitement : le
+# script distant n'appelle pas load_dotenv() (pour éviter le piège du
+# MLFLOW_TRACKING_URI local — cf. supabase_logger.py) donc rien n'est chargé
+# automatiquement depuis un .env côté Windows (qui n'existe pas).
+_SUPABASE_ENV = "; ".join(
+    f"$env:{var}='{os.environ[var]}'"
+    for var in ("SUPABASE_HOST", "SUPABASE_PORT", "SUPABASE_DB", "SUPABASE_USER", "SUPABASE_PASSWORD")
+)
+
 train = SSHOperator(
     task_id="train_model",
     ssh_conn_id=WINDOWS_SSH_CONN_ID,
@@ -59,6 +68,7 @@ train = SSHOperator(
         "powershell -NoProfile -Command \""
         f"$env:MLFLOW_TRACKING_URI='{MAC_MLFLOW_TAILSCALE_URI}'; "
         "$env:PYTHONUTF8='1'; "
+        f"{_SUPABASE_ENV}; "
         f"cd '{WINDOWS_REPO_DIR}'; "
         "& '.venv\\Scripts\\python.exe' -m src.train.dl_crossval_train "
         f"--generation {GENERATION}"

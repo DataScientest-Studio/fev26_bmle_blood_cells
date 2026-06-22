@@ -31,6 +31,10 @@ import json
 import random
 import time
 import warnings
+from datetime import datetime, timezone
+
+from src.monitoring.resource_monitor import ResourceMonitor
+from src.monitoring.supabase_logger import log_class_metrics_and_confusion, log_training_run
 warnings.filterwarnings('ignore')
 
 
@@ -324,7 +328,7 @@ if __name__ == "__main__":
             m = m.to(CFG["device"]).eval()
             with open(hist_path) as f:
                 history = json.load(f)
-            return m, history
+            return m, history, None, None
 
         print(f"\n  {'='*50}")
         print(f"  {model_key}  —  Fold {fold_num}/{N_FOLDS}")
@@ -386,6 +390,9 @@ if __name__ == "__main__":
         mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001"))
         mlflow.set_experiment("blood_cell_crossval_ameliorees")
         mlflow.start_run(run_name=f"{model_key}_fold{fold_num}")
+        run_id = mlflow.active_run().info.run_id
+        started_at = datetime.now(timezone.utc)
+        resource_monitor = ResourceMonitor().start()
         mlflow.log_params({
             "model": model_key, "fold": fold_num,
             "input_size": cfg_m["input_size"],
@@ -484,9 +491,15 @@ if __name__ == "__main__":
             mlflow.log_metric("final_epoch", len(history["val_acc"]))
 
         finally:
+            resource_summary = resource_monitor.stop()
+            log_training_run(
+                mlflow_run_id=run_id, model_name=model_key, generation=args.generation, fold=fold_num,
+                device=CFG["device"], started_at=started_at, ended_at=datetime.now(timezone.utc),
+                resource_summary=resource_summary,
+            )
             mlflow.end_run()
 
-        return model, history
+        return model, history, run_id, resource_summary
 
     def register_and_promote_best_fold(model_key, df_model_results, generation):
         """Enregistre le meilleur fold (macro_f1 max) dans le Model Registry,
@@ -600,7 +613,9 @@ if __name__ == "__main__":
         for model_key in MODELS_CONFIG:
             t_run_start = time.time()
 
-            model, history = train_model_fold(model_key, fold_num, fold_dir, idx_train, idx_val)
+            model, history, fold_run_id, _ = train_model_fold(
+                model_key, fold_num, fold_dir, idx_train, idx_val
+            )
 
             # Évaluation sur le test fold
             cfg_m = MODELS_CONFIG[model_key]
@@ -613,6 +628,12 @@ if __name__ == "__main__":
             recall_per_class = recall_score(
                 y_true, y_pred, average=None, labels=list(range(NUM_CLASSES)), zero_division=0
             )
+
+            if fold_run_id is not None:
+                log_class_metrics_and_confusion(
+                    mlflow_run_id=fold_run_id, model_name=model_key, generation=args.generation,
+                    fold=fold_num, class_names=CLASS_NAMES, y_true=y_true, y_pred=y_pred,
+                )
 
             y_true_1d = y_true.ravel()
             try:

@@ -56,6 +56,62 @@ CREATE TABLE IF NOT EXISTS dataset_images (
 );
 """
 
+# Monitoring entraînement : consommation ressources (1 ligne par run/fold)
+# La table training_runs existe déjà (créée via l'API : triggered_by, data_dir,
+# epochs_head, epochs_full, val_acc, test_acc, status, started_at, mlflow_run_id).
+# On l'étend plutôt que d'en créer une autre, pour garder un seul historique
+# de runs d'entraînement.
+SQL_TRAINING_RUNS = """
+CREATE TABLE IF NOT EXISTS training_runs (
+    id              SERIAL PRIMARY KEY,
+    mlflow_run_id   TEXT,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status          TEXT NOT NULL DEFAULT 'running'
+);
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS model_name           TEXT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS generation           TEXT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS fold                 INTEGER;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS device               TEXT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS ended_at             TIMESTAMPTZ;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS duration_seconds     FLOAT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS cpu_percent_avg      FLOAT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS ram_used_mb_avg      FLOAT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS gpu_name             TEXT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS gpu_util_percent_avg FLOAT;
+ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS gpu_mem_used_mb_avg  FLOAT;
+"""
+
+# Monitoring qualité : % par classe (1 ligne par classe par run/fold)
+SQL_CLASS_METRICS = """
+CREATE TABLE IF NOT EXISTS class_metrics (
+    id              SERIAL PRIMARY KEY,
+    mlflow_run_id   TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    generation      TEXT,
+    fold            INTEGER,
+    class_name      TEXT NOT NULL,
+    precision       FLOAT,
+    recall          FLOAT,
+    f1              FLOAT,
+    support         INTEGER,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+# Matrice de confusion complète (1 ligne par run/fold, JSON)
+SQL_CONFUSION_MATRICES = """
+CREATE TABLE IF NOT EXISTS confusion_matrices (
+    id              SERIAL PRIMARY KEY,
+    mlflow_run_id   TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    generation      TEXT,
+    fold            INTEGER,
+    class_order     JSONB NOT NULL,
+    matrix          JSONB NOT NULL,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
 
 # ── Connexion ─────────────────────────────────────────────────────────────────
 
@@ -78,9 +134,13 @@ def create_tables(conn) -> None:
     cur = conn.cursor()
     cur.execute(SQL_PREDICTIONS)
     cur.execute(SQL_DATASET_IMAGES)
+    cur.execute(SQL_TRAINING_RUNS)
+    cur.execute(SQL_CLASS_METRICS)
+    cur.execute(SQL_CONFUSION_MATRICES)
     conn.commit()
     cur.close()
-    print("  [OK] Tables 'predictions' et 'dataset_images' créées (ou déjà existantes)")
+    print("  [OK] Tables 'predictions', 'dataset_images', 'training_runs', "
+          "'class_metrics', 'confusion_matrices' créées (ou déjà existantes)")
 
 
 # ── Étape 3 : peupler dataset_images ─────────────────────────────────────────

@@ -13,6 +13,7 @@ import random
 import subprocess
 import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -33,6 +34,9 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+
+from src.monitoring.resource_monitor import ResourceMonitor
+from src.monitoring.supabase_logger import log_class_metrics_and_confusion, log_training_run
 
 warnings.filterwarnings("ignore")
 plt.switch_backend("Agg")
@@ -306,6 +310,8 @@ def _register_and_promote(run_id: str, metrics: dict) -> None:
 def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
     _setup_mlflow()
     t_start = time.time()
+    started_at = datetime.now(timezone.utc)
+    monitor = ResourceMonitor().start()
 
     seed = cfg["seed"]
     random.seed(seed)
@@ -461,6 +467,18 @@ def train(data_dir: Path, output_dir: Path, cfg: dict) -> dict:
         test_metrics = _compute_test_metrics(preds, trues)
         train_time_s = time.time() - t_start
         n_params = sum(p.numel() for p in model.parameters())
+
+        resource_summary = monitor.stop()
+        log_training_run(
+            mlflow_run_id=run.info.run_id, model_name=MLFLOW_MODEL_NAME,
+            generation=None, fold=None, device=device,
+            started_at=started_at, ended_at=datetime.now(timezone.utc),
+            resource_summary=resource_summary,
+        )
+        log_class_metrics_and_confusion(
+            mlflow_run_id=run.info.run_id, model_name=MLFLOW_MODEL_NAME,
+            generation=None, fold=None, class_names=CLASSES, y_true=trues, y_pred=preds,
+        )
 
         mlflow.log_metrics({
             "best_val_acc": best_val_acc,
