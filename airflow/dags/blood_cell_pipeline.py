@@ -128,8 +128,9 @@ def _sync_to_datalake(**context):
     torch.save(model.state_dict(), f"{PROJECT_DIR}/models/best_DenseNet_121.pth")
     print(f"Poids v{prod_mv.version} écrits dans models/best_DenseNet_121.pth")
 
-    def run(cmd):
-        print(f"$ {' '.join(cmd)}")
+    def run(cmd, redact=None):
+        shown = [c if c != redact else "***" for c in cmd] if redact else cmd
+        print(f"$ {' '.join(shown)}")
         subprocess.run(cmd, cwd=PROJECT_DIR, check=True)
 
     run(["dvc", "add", "models"])
@@ -145,7 +146,11 @@ def _sync_to_datalake(**context):
         print("Rien à committer (models.dvc déjà à jour) — pas de push.")
     else:
         token = os.environ["GITHUB_TOKEN"]
-        run(["git", "-c", f"http.extraHeader=Authorization: Bearer {token}", "push", "origin", "HEAD:main"])
+        remote_url = subprocess.run(
+            ["git", "remote", "get-url", "origin"], cwd=PROJECT_DIR, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        push_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
+        run(["git", "push", push_url, "HEAD:main"], redact=push_url)
         print(f"Pushé sur GitHub : {commit_msg}")
 
     for name in INFERENCE_CONTAINERS:
