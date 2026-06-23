@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 
 from src.monitoring.resource_monitor import ResourceMonitor
 from src.monitoring.supabase_logger import log_class_metrics_and_confusion, log_training_run
+from src.train.training import _get_dvc_hash, _get_git_commit
 warnings.filterwarnings('ignore')
 
 
@@ -530,7 +531,12 @@ if __name__ == "__main__":
                 "n_train": int(best_row["n_train"]), "n_val": int(best_row["n_val"]),
                 "n_test": int(best_row["n_test"]),
             })
-            mlflow.set_tags({"generation": generation, "source": "dl_crossval_train"})
+            mlflow.set_tags({
+                "generation":       generation,
+                "source":           "dl_crossval_train",
+                "git_commit":       _get_git_commit(),
+                "dvc_dataset_hash": _get_dvc_hash(TRAIN_DIR),
+            })
             mlflow.log_metrics({
                 "accuracy": float(best_row["accuracy"]),
                 "macro_f1": float(best_row["macro_f1"]),

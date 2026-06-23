@@ -50,6 +50,7 @@ from tqdm import tqdm
 
 from src.monitoring.resource_monitor import ResourceMonitor
 from src.monitoring.supabase_logger import log_class_metrics_and_confusion, log_training_run
+from src.train.training import _get_dvc_hash, _get_git_commit
 
 warnings.filterwarnings("ignore")
 
@@ -287,7 +288,14 @@ def main():
             "batch_size": args.batch_size, "n_total_images": len(paths),
             "replay_per_class": args.replay_per_class,
         })
-        mlflow.set_tags({"generation": args.generation, "source": f"tiff_batch_{batch_dir.name}"})
+        mlflow.set_tags({
+            "generation":       args.generation,
+            "source":           f"tiff_batch_{batch_dir.name}",
+            "git_commit":       _get_git_commit(),
+            "run_type":         "retrain",
+            "dvc_dataset_hash": _get_dvc_hash(batch_dir),
+            "dataset_name":     batch_dir.name,
+        })
 
         try:
             for epoch in range(args.epochs):
