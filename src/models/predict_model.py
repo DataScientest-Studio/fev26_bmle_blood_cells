@@ -122,27 +122,20 @@ def predict(image_path: Path, model_path: Path = None) -> dict:
 
 
 def _log_to_supabase(image_name: str, result: dict, mlflow_run_id: str = "") -> None:
-    """Logue la prédiction dans la table Supabase predictions. Silencieux si indisponible."""
+    """Logue la prédiction dans la table Supabase predictions via REST API. Silencieux si indisponible."""
     try:
-        import psycopg2
-        conn = psycopg2.connect(
-            host=os.getenv("SUPABASE_HOST"),
-            port=int(os.getenv("SUPABASE_PORT", 5432)),
-            dbname=os.getenv("SUPABASE_DB"),
-            user=os.getenv("SUPABASE_USER"),
-            password=os.getenv("SUPABASE_PASSWORD"),
-            connect_timeout=5,
-            sslmode="require",
-        )
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO predictions (image_name, predicted_class, confidence, mlflow_run_id)"
-            " VALUES (%s, %s, %s, %s)",
-            (image_name, result["predicted_class"], round(result["confidence"], 4), mlflow_run_id),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_ANON_KEY")
+        if not url or not key:
+            raise ValueError("SUPABASE_URL ou SUPABASE_ANON_KEY manquant dans .env")
+        client = create_client(url, key)
+        client.table("predictions").insert({
+            "image_name": image_name,
+            "predicted_class": result["predicted_class"],
+            "confidence": round(result["confidence"], 4),
+            "mlflow_run_id": mlflow_run_id,
+        }).execute()
     except Exception as exc:
         print(f"  [warn] Supabase logging skipped: {exc}")
 

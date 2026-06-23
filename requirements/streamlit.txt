@@ -15,7 +15,7 @@ catboost==1.2.10
 shap==0.51.0
 imbalanced-learn==0.14.1
 
-mlflow==3.11.1
+mlflow==3.13.0
 
 dvc==3.67.1
 dvc-http==2.32.0

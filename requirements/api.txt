@@ -15,5 +15,5 @@ opencv-python-headless==4.13.0.92
 numpy==2.4.4
 
 # MLflow tracking
-mlflow==3.11.1
+mlflow==3.13.0
 python-multipart==0.0.6

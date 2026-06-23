@@ -5,7 +5,7 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 
-RUN pip install mlflow==3.11.1 psycopg2-binary
+RUN pip install mlflow==3.13.0 psycopg2-binary
 
 EXPOSE 5000
 
