@@ -43,6 +43,19 @@ CREATE TABLE IF NOT EXISTS predictions (
     mlflow_run_id   TEXT,
     created_at      TIMESTAMP DEFAULT NOW()
 );
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS model_version TEXT;
+"""
+
+# Désaccord médecin sur une prédiction — relié à predictions.id
+SQL_PREDICTION_FEEDBACK = """
+CREATE TABLE IF NOT EXISTS prediction_feedback (
+    id              SERIAL PRIMARY KEY,
+    prediction_id   INTEGER REFERENCES predictions(id),
+    agrees          BOOLEAN NOT NULL,
+    corrected_class TEXT,
+    comment         TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 SQL_DATASET_IMAGES = """
@@ -133,14 +146,15 @@ def _connect():
 def create_tables(conn) -> None:
     cur = conn.cursor()
     cur.execute(SQL_PREDICTIONS)
+    cur.execute(SQL_PREDICTION_FEEDBACK)
     cur.execute(SQL_DATASET_IMAGES)
     cur.execute(SQL_TRAINING_RUNS)
     cur.execute(SQL_CLASS_METRICS)
     cur.execute(SQL_CONFUSION_MATRICES)
     conn.commit()
     cur.close()
-    print("  [OK] Tables 'predictions', 'dataset_images', 'training_runs', "
-          "'class_metrics', 'confusion_matrices' créées (ou déjà existantes)")
+    print("  [OK] Tables 'predictions', 'prediction_feedback', 'dataset_images', "
+          "'training_runs', 'class_metrics', 'confusion_matrices' créées (ou déjà existantes)")
 
 
 # ── Étape 3 : peupler dataset_images ─────────────────────────────────────────
