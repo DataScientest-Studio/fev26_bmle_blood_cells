@@ -73,6 +73,7 @@ app.add_middleware(
 # Variables globales pour le modèle
 model = None
 model_device = None
+model_version = None  # version MLflow Registry actuellement chargée (None si fallback .pth)
 
 # Transformations pour les images
 transform = transforms.Compose([
@@ -101,16 +102,50 @@ async def require_api_key(api_key: str = Security(_api_key_header)):
         raise HTTPException(status_code=401, detail="Clé API invalide ou absente.")
 
 
+def _log_prediction(image_name: str, predicted_class: str, confidence: float) -> Optional[int]:
+    """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
+    Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
+    try:
+        from src.auth.db import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO predictions (image_name, predicted_class, confidence, model_version)
+            VALUES (%s, %s, %s, %s) RETURNING id
+            """,
+            (image_name, predicted_class, confidence, model_version),
+        )
+        prediction_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return prediction_id
+    except Exception as e:
+        print(f"[warn] Supabase (predictions) indisponible : {e}")
+        return None
+
+
 def _load_from_registry():
     """Charge le modèle @production depuis le MLflow Registry."""
     import mlflow
+    from mlflow.tracking import MlflowClient
+
+    global model_version
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(tracking_uri)
     model_uri = f"models:/{MLFLOW_MODEL_NAME}@production"
     loaded = mlflow.pytorch.load_model(model_uri, map_location=DEVICE)
     loaded = loaded.to(DEVICE)
     loaded.eval()
-    print(f"[MLflow] Modèle chargé : {model_uri}")
+
+    try:
+        mv = MlflowClient().get_model_version_by_alias(MLFLOW_MODEL_NAME, "production")
+        model_version = mv.version
+    except Exception:
+        model_version = None
+
+    print(f"[MLflow] Modèle chargé : {model_uri} (version {model_version})")
     return loaded
 
 
@@ -190,7 +225,8 @@ async def predict(file: UploadFile = File(...)):
 
     Returns:
     {
-        "class": "Lymphocyte",
+        "prediction_id": 42,
+        "predicted_class": "Lymphocyte",
         "confidence": 0.987,
         "all_probas": {
             "Basophil": 0.001,
@@ -226,7 +262,10 @@ async def predict(file: UploadFile = File(...)):
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
+        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3))
+
         return {
+            "prediction_id": prediction_id,
             "predicted_class": pred_label,
             "confidence": round(pred_confidence, 3),
             "is_critical": pred_label.lower() in {"erythroblast", "ig"},
@@ -240,6 +279,42 @@ async def predict(file: UploadFile = File(...)):
             "error": str(e),
             "message": "Prédiction échouée"
         }
+
+
+class FeedbackPayload(BaseModel):
+    prediction_id: int
+    agrees: bool
+    corrected_class: Optional[str] = None
+    comment: Optional[str] = None
+
+
+@app.post("/feedback", tags=["Inférence"], dependencies=[Depends(require_api_key)])
+async def feedback(payload: FeedbackPayload):
+    """
+    Enregistre le désaccord (ou l'accord) d'un médecin sur une prédiction,
+    relié à predictions.id (renvoyé par /predict sous prediction_id).
+    """
+    if payload.corrected_class is not None and payload.corrected_class not in CLASSES:
+        raise HTTPException(status_code=422, detail=f"corrected_class doit être l'une de {CLASSES}")
+
+    try:
+        from src.auth.db import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO prediction_feedback (prediction_id, agrees, corrected_class, comment)
+            VALUES (%s, %s, %s, %s) RETURNING id
+            """,
+            (payload.prediction_id, payload.agrees, payload.corrected_class, payload.comment),
+        )
+        feedback_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"feedback_id": feedback_id, "status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Supabase indisponible : {e}")
 
 
 @app.get("/classes", tags=["Info"])

@@ -17,3 +17,8 @@ numpy==2.4.4
 # MLflow tracking
 mlflow==3.13.0
 python-multipart==0.0.6
+
+# Supabase (logs predictions/feedback) — psycopg2 requis par src.auth.db,
+# bcrypt requis transitivement par l'import du package src.auth (users.py)
+psycopg2-binary>=2.9
+bcrypt>=4.0
