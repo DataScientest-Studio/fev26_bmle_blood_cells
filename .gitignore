@@ -175,6 +175,7 @@ mlartifacts/
 !reports/Sara/*.docx
 !reports/Romane/*.docx
 !tests/*.docx
+!src/evidently/evidently_guide.docx
 
 # Logs de run
 reports/*.log
