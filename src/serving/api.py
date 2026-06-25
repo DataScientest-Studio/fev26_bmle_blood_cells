@@ -15,17 +15,17 @@ import time
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 os.environ["PYTORCH_NO_MPS"] = "1"
 
-import torch
-import torch.nn as nn
-from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
-from pathlib import Path
-from pydantic import BaseModel
-from typing import Optional
-from PIL import Image
-from torchvision import transforms
-from torchvision.models import densenet121
+import torch  # noqa: E402
+import torch.nn as nn  # noqa: E402
+from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.security import APIKeyHeader  # noqa: E402
+from pathlib import Path  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+from typing import Optional  # noqa: E402
+from PIL import Image  # noqa: E402
+from torchvision import transforms  # noqa: E402
+from torchvision.models import densenet121  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -118,7 +118,9 @@ def _extract_image_stats(image: Image.Image) -> dict:
     }
 
 
-def _log_prediction(image_name: str, predicted_class: str, confidence: float, image: Image.Image = None) -> Optional[int]:
+def _log_prediction(
+    image_name: str, predicted_class: str, confidence: float, image: Image.Image = None
+) -> Optional[int]:
     """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
     Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
     try:

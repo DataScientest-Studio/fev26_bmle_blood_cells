@@ -48,7 +48,8 @@ def _get_conn():
 def _load_reference() -> pd.DataFrame:
     conn = _get_conn()
     df = pd.read_sql(
-        "SELECT class_name, mean_brightness, std_brightness, mean_r, mean_g, mean_b, image_width, image_height FROM reference_features",
+        "SELECT class_name, mean_brightness, std_brightness, mean_r, mean_g, mean_b,"
+        " image_width, image_height FROM reference_features",
         conn,
     )
     conn.close()
@@ -434,6 +435,7 @@ def load_last_report() -> dict | None:
         "pred_drift_level":    _drift_level(float(row["pred_drift_score"]) if row["pred_drift_score"] else 0.0),
         "model_drift_score":   float(row["model_drift_score"]) if row["model_drift_score"] else None,
         "n_drifted_features":  int(row["n_drifted_features"]) if row["n_drifted_features"] else 0,
-        "metrics":             row["metrics_json"] if isinstance(row["metrics_json"], dict) else json.loads(row["metrics_json"] or "{}"),
+        "metrics":             (row["metrics_json"] if isinstance(row["metrics_json"], dict)
+                                else json.loads(row["metrics_json"] or "{}")),
         "report_html":         row["report_html"],
     }

@@ -9,7 +9,6 @@ Usage:
 
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import psycopg2

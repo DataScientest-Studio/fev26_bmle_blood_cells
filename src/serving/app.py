@@ -641,7 +641,7 @@ def show_drift_tab() -> None:
                         else:
                             import plotly.graph_objects as go
                             fig2 = go.Figure()
-                            for metric, color in [("f1","#1f77b4"), ("precision","#ff7f0e"), ("recall","#2ca02c")]:
+                            for metric, color in [("f1", "#1f77b4"), ("precision", "#ff7f0e"), ("recall", "#2ca02c")]:
                                 fig2.add_trace(go.Scatter(
                                     x=cls_data["generation"].astype(str),
                                     y=cls_data[metric],
