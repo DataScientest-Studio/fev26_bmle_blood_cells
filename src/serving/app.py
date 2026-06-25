@@ -21,7 +21,7 @@ from mlflow.tracking import MlflowClient
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
 
 from src.auth.users import verify_user  # noqa: E402
 
@@ -130,7 +130,7 @@ def show_class_reference() -> None:
 def fetch_training_runs() -> pd.DataFrame:
     """Lit tous les runs d'entrainement loggues dans Supabase (training_runs)."""
     conn = psycopg2.connect(
-        host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 5432)),
+        host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 6543)),
         dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
         password=os.getenv("SUPABASE_PASSWORD"), connect_timeout=10, sslmode="require",
     )
@@ -396,6 +396,287 @@ def show_classification_tab() -> None:
                         st.error(f"Erreur lors de l'envoi : {res['message']}")
 
 
+_DRIFT_LEVELS = {
+    "normal":   ("✅ Normal",   "green"),
+    "warning":  ("⚠️ Warning",  "orange"),
+    "alerte":   ("🔴 Alerte",   "red"),
+    "critique": ("🚨 Critique", "red"),
+    "unknown":  ("— Inconnu",   "gray"),
+}
+
+
+def _level_badge(level: str) -> str:
+    label, color = _DRIFT_LEVELS.get(level, ("—", "gray"))
+    return f"<span style='color:{color};font-weight:bold'>{label}</span>"
+
+
+def show_drift_tab() -> None:
+    """Onglet Drift : rapports Evidently de data drift et model drift."""
+    st.subheader("Monitoring du drift (IVDR 2017/746)")
+    st.caption(
+        "Seuils d'alerte : warning > 0.10 | alerte > 0.20 | critique > 0.30"
+    )
+
+    col_gen, col_ver = st.columns([2, 1])
+    with col_ver:
+        model_version_input = st.text_input(
+            "Version modele (vide = toutes)", value="", key="drift_model_version"
+        )
+    with col_gen:
+        generate = st.button("Generer le rapport de drift", type="primary")
+
+    if generate:
+        with st.spinner("Generation du rapport Evidently en cours..."):
+            try:
+                from src.evidently.drift_report import generate_report
+                result = generate_report(
+                    model_version=model_version_input.strip() or None
+                )
+                if "error" in result:
+                    st.error(result["error"])
+                    return
+                st.session_state["last_drift_result"] = result
+                st.success(f"Rapport genere (id={result['report_id']}) et sauvegarde dans Supabase.")
+            except Exception as e:
+                st.error(f"Erreur : {e}")
+                return
+
+    # Charger le dernier rapport (genere ou depuis Supabase)
+    result = st.session_state.get("last_drift_result")
+    if result is None:
+        try:
+            from src.evidently.drift_report import load_last_report
+            result = load_last_report()
+        except Exception:
+            result = None
+
+    if result is None:
+        st.info("Aucun rapport disponible. Clique sur 'Generer le rapport de drift'.")
+        return
+
+    st.divider()
+
+    # ── Metriques cles ────────────────────────────────────────────────────────
+    st.subheader("Resume")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Reference", f"{result.get('n_reference', 0)} imgs")
+    c2.metric("Production", f"{result.get('n_current', 0)} predictions")
+    c3.metric("Features driftees", result.get("n_drifted_features", 0))
+
+    data_level = result.get("data_drift_level", "unknown")
+    pred_level = result.get("pred_drift_level", "unknown")
+    c4.metric(
+        "Data drift",
+        f"{result.get('data_drift_score', 0):.3f}",
+        delta=_DRIFT_LEVELS[data_level][0],
+        delta_color="off",
+    )
+    c5.metric(
+        "Prediction drift",
+        f"{result.get('pred_drift_score', 0):.3f}",
+        delta=_DRIFT_LEVELS[pred_level][0],
+        delta_color="off",
+    )
+
+    # Model drift (feedback medecin)
+    model_score = result.get("model_drift_score")
+    metrics = result.get("metrics", {})
+    model_metrics = metrics.get("model_drift", {})
+    if model_score is not None:
+        st.divider()
+        st.subheader("Model drift (feedback medecin)")
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("Feedbacks recus", model_metrics.get("n_feedback", 0))
+        mc2.metric("Taux accord medecin", f"{model_metrics.get('accuracy', 0)*100:.1f}%")
+        mc3.metric(
+            "Taux desaccord",
+            f"{model_metrics.get('disagree_rate', 0)*100:.1f}%",
+            delta="Alerte si > 10%",
+            delta_color="off",
+        )
+    else:
+        st.info("Model drift : aucun feedback medecin enregistre pour l'instant.")
+
+    # ── Alertes actives ───────────────────────────────────────────────────────
+    alerts = []
+    if result.get("data_drift_score", 0) >= 0.30:
+        alerts.append("CRITIQUE — Data drift score > 0.30 : investigation obligatoire.")
+    elif result.get("data_drift_score", 0) >= 0.20:
+        alerts.append("ALERTE — Data drift score > 0.20 : surveillance renforcee.")
+    elif result.get("data_drift_score", 0) >= 0.10:
+        alerts.append("WARNING — Data drift score > 0.10 : surveiller l'evolution.")
+
+    if result.get("pred_drift_score", 0) >= 0.20:
+        alerts.append("ALERTE — Distribution des classes predites a derive.")
+
+    if model_score is not None and model_score >= 0.15:
+        alerts.append("ALERTE — Taux de desaccord medecin > 15%.")
+    elif model_score is not None and model_score >= 0.10:
+        alerts.append("WARNING — Taux de desaccord medecin > 10%.")
+
+    if alerts:
+        st.divider()
+        for alert in alerts:
+            if alert.startswith("CRITIQUE"):
+                st.error(alert)
+            elif alert.startswith("ALERTE"):
+                st.warning(alert)
+            else:
+                st.info(alert)
+
+    # ── Rapport Evidently complet ─────────────────────────────────────────────
+    if result.get("report_html"):
+        st.divider()
+        st.subheader("Rapport Evidently complet")
+        if result.get("created_at"):
+            st.caption(f"Genere le : {result['created_at']} | Version modele : {result.get('model_version', 'toutes')}")
+        st.components.v1.html(result["report_html"], height=900, scrolling=True)
+
+    # ── Performance du modele (MLflow + Supabase class_metrics) ──────────────
+    st.divider()
+    st.subheader("Performance du modele (MLflow)")
+    st.caption("Evolution de macro_F1 et accuracy par generation — seuil d'alerte IVDR : baisse > 5%")
+
+    load_perf = st.button("Charger les metriques de performance", key="load_perf")
+    if load_perf or st.session_state.get("perf_data"):
+        if load_perf:
+            with st.spinner("Chargement des metriques MLflow + Supabase..."):
+                try:
+                    from src.evidently.drift_report import load_performance_metrics
+                    perf = load_performance_metrics()
+                    st.session_state["perf_data"] = perf
+                except Exception as e:
+                    st.error(f"Impossible de charger les metriques : {e}")
+                    perf = None
+        else:
+            perf = st.session_state.get("perf_data")
+
+        if perf:
+            df_global  = perf["df_global"]
+            df_classes = perf["df_classes"]
+            perf_alerts = perf.get("alerts", [])
+            current    = perf.get("current", {})
+            baseline   = perf.get("baseline", {})
+
+            # Metriques globales courantes
+            pc1, pc2, pc3, pc4 = st.columns(4)
+            pc1.metric("Generations evaluees", perf.get("n_generations", 0))
+            if current.get("macro_f1") is not None:
+                delta_f1 = None
+                if baseline.get("macro_f1") is not None and baseline.get("generation") != current.get("generation"):
+                    delta_f1 = f"{(current['macro_f1'] - baseline['macro_f1'])*100:+.2f}% vs baseline"
+                pc2.metric("macro_F1 (derniere gen)", f"{current['macro_f1']:.4f}", delta=delta_f1)
+            if current.get("accuracy") is not None:
+                delta_acc = None
+                if baseline.get("accuracy") is not None and baseline.get("generation") != current.get("generation"):
+                    delta_acc = f"{(current['accuracy'] - baseline['accuracy'])*100:+.2f}% vs baseline"
+                pc3.metric("Accuracy (derniere gen)", f"{current['accuracy']:.4f}", delta=delta_acc)
+            pc4.metric("Generation actuelle", current.get("generation", "N/A"))
+
+            # Alertes performance
+            if perf_alerts:
+                st.divider()
+                for alert in perf_alerts:
+                    if "CRITIQUE" in alert:
+                        st.error(alert)
+                    elif "ALERTE" in alert:
+                        st.warning(alert)
+                    else:
+                        st.info(alert)
+
+            # Evolution macro_F1 et accuracy par generation
+            if not df_global.empty and len(df_global) > 1:
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df_global["generation"].astype(str),
+                    y=df_global["macro_f1"],
+                    mode="lines+markers",
+                    name="macro_F1",
+                    line=dict(color="#1f77b4"),
+                ))
+                if "accuracy" in df_global.columns and df_global["accuracy"].notna().any():
+                    fig.add_trace(go.Scatter(
+                        x=df_global["generation"].astype(str),
+                        y=df_global["accuracy"],
+                        mode="lines+markers",
+                        name="Accuracy",
+                        line=dict(color="#2ca02c", dash="dash"),
+                    ))
+                fig.add_hline(
+                    y=(df_global["macro_f1"].iloc[0] - 0.05),
+                    line_dash="dot",
+                    line_color="red",
+                    annotation_text="Seuil alerte (-5%)",
+                )
+                fig.update_layout(
+                    title="Evolution des metriques globales par generation",
+                    xaxis_title="Generation",
+                    yaxis_title="Score",
+                    yaxis_range=[0, 1],
+                    height=350,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Metriques par classe — focus Erythroblast et IG
+            if not df_classes.empty:
+                st.divider()
+                st.markdown("**Metriques par classe (F1 — focus classes critiques)**")
+                critical_cls = ["Erythroblast", "IG"]
+                tabs_cls = st.tabs(critical_cls + ["Toutes les classes"])
+                for i, cls in enumerate(critical_cls):
+                    with tabs_cls[i]:
+                        cls_data = df_classes[
+                            df_classes["class_name"].str.lower() == cls.lower()
+                        ].sort_values("generation")
+                        if cls_data.empty:
+                            st.info(f"Aucune donnee pour {cls}.")
+                        elif len(cls_data) == 1:
+                            row = cls_data.iloc[0]
+                            st.metric(f"F1 {cls}", f"{row['f1']:.4f}")
+                            cc1, cc2, cc3 = st.columns(3)
+                            cc1.metric("Precision", f"{row['precision']:.4f}")
+                            cc2.metric("Recall", f"{row['recall']:.4f}")
+                            cc3.metric("Support", int(row["support"]))
+                        else:
+                            import plotly.graph_objects as go
+                            fig2 = go.Figure()
+                            for metric, color in [("f1","#1f77b4"), ("precision","#ff7f0e"), ("recall","#2ca02c")]:
+                                fig2.add_trace(go.Scatter(
+                                    x=cls_data["generation"].astype(str),
+                                    y=cls_data[metric],
+                                    mode="lines+markers",
+                                    name=metric.capitalize(),
+                                    line=dict(color=color),
+                                ))
+                            fig2.update_layout(
+                                title=f"Evolution {cls}",
+                                xaxis_title="Generation",
+                                yaxis_range=[0, 1],
+                                height=300,
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
+                with tabs_cls[-1]:
+                    # Tableau toutes classes — derniere generation
+                    if not df_classes.empty:
+                        last_gen = df_classes["generation"].max()
+                        df_last = df_classes[df_classes["generation"] == last_gen][
+                            ["class_name", "precision", "recall", "f1", "support"]
+                        ].sort_values("f1", ascending=False)
+                        df_last = df_last.rename(columns={
+                            "class_name": "Classe",
+                            "precision": "Precision",
+                            "recall": "Recall",
+                            "f1": "F1",
+                            "support": "Support",
+                        })
+                        st.caption(f"Generation {last_gen}")
+                        st.dataframe(
+                            df_last.style.format({"Precision": "{:.4f}", "Recall": "{:.4f}", "F1": "{:.4f}"}),
+                            use_container_width=True,
+                        )
+
+
 def main() -> None:
     """Fonction principale Streamlit."""
     st.set_page_config(
@@ -413,11 +694,13 @@ def main() -> None:
             st.session_state.clear()
             st.rerun()
 
-    tab_classify, tab_logs = st.tabs(["Classification", "Logs"])
+    tab_classify, tab_logs, tab_drift = st.tabs(["Classification", "Logs", "Drift"])
     with tab_classify:
         show_classification_tab()
     with tab_logs:
         show_logs_tab()
+    with tab_drift:
+        show_drift_tab()
 
 
 if __name__ == "__main__":

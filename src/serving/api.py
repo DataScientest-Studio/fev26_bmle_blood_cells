@@ -10,6 +10,11 @@ import io
 import os
 import sys
 import time
+
+# Force CPU — MPS hang sur macOS récent avec certaines versions de PyTorch
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ["PYTORCH_NO_MPS"] = "1"
+
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends
@@ -25,13 +30,8 @@ from torchvision.models import densenet121
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-# Détection du device
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-elif torch.cuda.is_available():
-    DEVICE = torch.device("cuda")
-else:
-    DEVICE = torch.device("cpu")
+# Force CPU (MPS désactivé — hang sur macOS récent)
+DEVICE = torch.device("cpu")
 
 print(f"Using device: {DEVICE}")
 
@@ -102,19 +102,44 @@ async def require_api_key(api_key: str = Security(_api_key_header)):
         raise HTTPException(status_code=401, detail="Clé API invalide ou absente.")
 
 
-def _log_prediction(image_name: str, predicted_class: str, confidence: float) -> Optional[int]:
+def _extract_image_stats(image: Image.Image) -> dict:
+    """Extrait les stats image pour le monitoring de data drift."""
+    import numpy as np
+    arr = np.array(image.convert("RGB"), dtype=np.float32)
+    gray = arr.mean(axis=2)
+    return {
+        "mean_brightness": float(gray.mean()),
+        "std_brightness":  float(gray.std()),
+        "mean_r": float(arr[:, :, 0].mean()),
+        "mean_g": float(arr[:, :, 1].mean()),
+        "mean_b": float(arr[:, :, 2].mean()),
+        "image_width":  image.size[0],
+        "image_height": image.size[1],
+    }
+
+
+def _log_prediction(image_name: str, predicted_class: str, confidence: float, image: Image.Image = None) -> Optional[int]:
     """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
     Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
     try:
         from src.auth.db import get_connection
+        stats = _extract_image_stats(image) if image is not None else {}
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO predictions (image_name, predicted_class, confidence, model_version)
-            VALUES (%s, %s, %s, %s) RETURNING id
+            INSERT INTO predictions
+                (image_name, predicted_class, confidence, model_version,
+                 mean_brightness, std_brightness, mean_r, mean_g, mean_b,
+                 image_width, image_height)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
-            (image_name, predicted_class, confidence, model_version),
+            (
+                image_name, predicted_class, confidence, model_version,
+                stats.get("mean_brightness"), stats.get("std_brightness"),
+                stats.get("mean_r"), stats.get("mean_g"), stats.get("mean_b"),
+                stats.get("image_width"), stats.get("image_height"),
+            ),
         )
         prediction_id = cur.fetchone()[0]
         conn.commit()
@@ -175,17 +200,19 @@ def _load_from_file():
 
 
 def load_model():
-    """Charge le modèle — MLflow Registry @production en priorité, .pth local en fallback."""
+    """Charge le modèle — .pth local en priorité, MLflow Registry en fallback."""
     global model, model_device
 
     if model is not None:
         return model
 
     try:
-        model = _load_from_registry()
-    except Exception as exc:
-        print(f"[warn] MLflow Registry indisponible ({exc}) — fallback .pth local")
         model = _load_from_file()
+    except Exception:
+        try:
+            model = _load_from_registry()
+        except Exception as exc:
+            raise RuntimeError(f"Impossible de charger le modèle : {exc}")
 
     model_device = DEVICE
     return model
@@ -262,7 +289,7 @@ async def predict(file: UploadFile = File(...)):
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
-        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3))
+        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3), image)
 
         return {
             "prediction_id": prediction_id,
