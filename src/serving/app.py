@@ -180,6 +180,35 @@ def fetch_production_version() -> dict | None:
         return None
 
 
+@st.cache_data(ttl=300)
+def fetch_class_confidence(window_days: int = 180) -> pd.DataFrame:
+    """Part des predictions de chaque classe corrigees par un medecin
+    (table prediction_feedback, agrees=False), sur les derniers window_days jours."""
+    conn = psycopg2.connect(
+        host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 5432)),
+        dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
+        password=os.getenv("SUPABASE_PASSWORD"), connect_timeout=10, sslmode="require",
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.predicted_class,
+                   COUNT(*) AS total_predictions,
+                   COUNT(*) FILTER (WHERE pf.agrees = FALSE) AS corrections
+            FROM predictions p
+            LEFT JOIN prediction_feedback pf ON pf.prediction_id = p.id
+            WHERE p.created_at >= NOW() - (%s * INTERVAL '1 day')
+            GROUP BY p.predicted_class
+        """, (window_days,))
+        cols = [d[0] for d in cur.description]
+        df = pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        conn.close()
+    if not df.empty:
+        df["confidence_pct"] = 100 * (1 - df["corrections"] / df["total_predictions"])
+    return df
+
+
 def show_logs_tab() -> None:
     """Onglet Logs : tous les runs d'entrainement et leurs stats (GPU, temps, accuracy...)."""
     st.subheader("Historique des entrainements")
@@ -332,6 +361,26 @@ def show_classification_tab() -> None:
         if is_critical:
             st.error("Classe critique clinique — verification humaine recommandee.")
 
+        try:
+            conf_row = fetch_class_confidence()
+            conf_row = conf_row[conf_row["predicted_class"] == pred_class]
+        except Exception:
+            conf_row = pd.DataFrame()
+        if not conf_row.empty:
+            total = int(conf_row["total_predictions"].iloc[0])
+            corrections = int(conf_row["corrections"].iloc[0])
+            conf_pct = conf_row["confidence_pct"].iloc[0]
+            if corrections == 0:
+                st.caption(
+                    f"Indice de confiance pour {pred_class} : {conf_pct:.0f}% "
+                    f"— jamais corrigee sur {total} predictions (6 derniers mois)."
+                )
+            else:
+                st.caption(
+                    f"Indice de confiance pour {pred_class} : {conf_pct:.0f}% "
+                    f"— corrigee {corrections} fois sur {total} predictions (6 derniers mois)."
+                )
+
         st.divider()
 
         st.subheader("Top 3 predictions")
@@ -370,16 +419,18 @@ def show_classification_tab() -> None:
             )
             corrected_class = None
             if agrees_label == "Non":
+                other_classes = [c for c in CLASSES if c != pred_class]
                 corrected_class = st.selectbox(
                     "Quelle est la classe correcte selon vous ?",
-                    CLASSES,
+                    other_classes,
                     key=f"corrected_{prediction_id}",
                 )
             comment = st.text_area(
                 "Commentaire (optionnel)", key=f"comment_{prediction_id}",
             )
 
-            if st.button("Envoyer mon avis", key=f"submit_{prediction_id}"):
+            submit_label = "Correction" if agrees_label == "Non" else "Envoyer mon avis"
+            if st.button(submit_label, key=f"submit_{prediction_id}"):
                 if agrees_label is None:
                     st.warning("Precise si tu es d'accord ou non avant d'envoyer.")
                 else:
@@ -391,6 +442,7 @@ def show_classification_tab() -> None:
                     )
                     if res["ok"]:
                         st.session_state[feedback_done_key] = True
+                        fetch_class_confidence.clear()
                         st.rerun()
                     else:
                         st.error(f"Erreur lors de l'envoi : {res['message']}")
