@@ -43,7 +43,14 @@ CREATE TABLE IF NOT EXISTS predictions (
     mlflow_run_id   TEXT,
     created_at      TIMESTAMP DEFAULT NOW()
 );
-ALTER TABLE predictions ADD COLUMN IF NOT EXISTS model_version TEXT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS model_version    TEXT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_brightness  FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS std_brightness   FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_r           FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_g           FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_b           FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS image_width      INTEGER;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS image_height     INTEGER;
 """
 
 # Désaccord médecin sur une prédiction — relié à predictions.id
@@ -111,6 +118,41 @@ CREATE TABLE IF NOT EXISTS class_metrics (
 );
 """
 
+# Données de référence pour le monitoring de drift (stats image par classe)
+SQL_REFERENCE_FEATURES = """
+CREATE TABLE IF NOT EXISTS reference_features (
+    id              SERIAL PRIMARY KEY,
+    class_name      TEXT NOT NULL,
+    mean_brightness FLOAT,
+    std_brightness  FLOAT,
+    mean_r          FLOAT,
+    mean_g          FLOAT,
+    mean_b          FLOAT,
+    image_width     INTEGER,
+    image_height    INTEGER,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+# Rapports de drift Evidently (IVDR 2017/746)
+SQL_DRIFT_REPORTS = """
+CREATE TABLE IF NOT EXISTS drift_reports (
+    id                   SERIAL PRIMARY KEY,
+    model_version        TEXT,
+    n_reference          INTEGER,
+    n_current            INTEGER,
+    data_drift_detected  BOOLEAN,
+    data_drift_score     FLOAT,
+    pred_drift_detected  BOOLEAN,
+    pred_drift_score     FLOAT,
+    model_drift_score    FLOAT,
+    n_drifted_features   INTEGER,
+    metrics_json         JSONB,
+    report_html          TEXT,
+    created_at           TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
 # Matrice de confusion complète (1 ligne par run/fold, JSON)
 SQL_CONFUSION_MATRICES = """
 CREATE TABLE IF NOT EXISTS confusion_matrices (
@@ -151,10 +193,13 @@ def create_tables(conn) -> None:
     cur.execute(SQL_TRAINING_RUNS)
     cur.execute(SQL_CLASS_METRICS)
     cur.execute(SQL_CONFUSION_MATRICES)
+    cur.execute(SQL_REFERENCE_FEATURES)
+    cur.execute(SQL_DRIFT_REPORTS)
     conn.commit()
     cur.close()
-    print("  [OK] Tables 'predictions', 'prediction_feedback', 'dataset_images', "
-          "'training_runs', 'class_metrics', 'confusion_matrices' créées (ou déjà existantes)")
+    print("  [OK] Tables créées (ou déjà existantes) : predictions, prediction_feedback, "
+          "dataset_images, training_runs, class_metrics, confusion_matrices, "
+          "reference_features, drift_reports")
 
 
 # ── Étape 3 : peupler dataset_images ─────────────────────────────────────────
@@ -226,6 +271,78 @@ def populate_dataset(conn, data_dir: Path) -> None:
     counts = {s: sum(1 for r in rows if r["split"] == s) for s in ("train", "val", "test")}
     print(f"  [OK] {inserted} lignes insérées, {skipped} ignorées (déjà présentes)")
     print(f"       train={counts['train']}  val={counts['val']}  test={counts['test']}")
+
+    print("\nCalcul des stats de référence pour le drift monitoring...")
+    _populate_reference_features(conn, data_dir, rows)
+
+
+def _populate_reference_features(conn, data_dir: Path, rows: list[dict]) -> None:
+    """Calcule les stats image (brightness, RGB) par classe et les insère dans reference_features."""
+    try:
+        import numpy as np
+        from PIL import Image as PILImage
+    except ImportError:
+        print("  [KO] Pillow/numpy non installés — reference_features non peuplée")
+        return
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM reference_features")
+    if cur.fetchone()[0] > 0:
+        print("  [OK] reference_features déjà peuplée — ignorée")
+        cur.close()
+        return
+
+    by_class: dict[str, list] = {}
+    for r in rows:
+        by_class.setdefault(r["true_class"], []).append(r)
+
+    inserted = 0
+    for cls, items in by_class.items():
+        cls_dir = data_dir / cls
+        stats_list = []
+        for r in items:
+            img_path = cls_dir / r["image_name"]
+            if not img_path.exists():
+                continue
+            try:
+                img = PILImage.open(img_path).convert("RGB")
+                arr = np.array(img, dtype=np.float32)
+                gray = arr.mean(axis=2)
+                stats_list.append({
+                    "mean_brightness": float(gray.mean()),
+                    "std_brightness":  float(gray.std()),
+                    "mean_r": float(arr[:, :, 0].mean()),
+                    "mean_g": float(arr[:, :, 1].mean()),
+                    "mean_b": float(arr[:, :, 2].mean()),
+                    "image_width":  img.size[0],
+                    "image_height": img.size[1],
+                })
+            except Exception:
+                continue
+
+        if not stats_list:
+            continue
+
+        cur.execute("""
+            INSERT INTO reference_features
+                (class_name, mean_brightness, std_brightness,
+                 mean_r, mean_g, mean_b, image_width, image_height)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            cls,
+            float(np.mean([s["mean_brightness"] for s in stats_list])),
+            float(np.mean([s["std_brightness"]  for s in stats_list])),
+            float(np.mean([s["mean_r"]          for s in stats_list])),
+            float(np.mean([s["mean_g"]          for s in stats_list])),
+            float(np.mean([s["mean_b"]          for s in stats_list])),
+            int(np.median([s["image_width"]     for s in stats_list])),
+            int(np.median([s["image_height"]    for s in stats_list])),
+        ))
+        inserted += 1
+
+    conn.commit()
+    cur.close()
+    print(f"  [OK] reference_features peuplée : {inserted} classe(s) insérée(s)")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

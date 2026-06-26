@@ -6,32 +6,34 @@ Lancement :
     uvicorn src.serving.api:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import base64
 import io
 import os
 import sys
 import time
-import torch
-import torch.nn as nn
-from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
-from pathlib import Path
-from pydantic import BaseModel
-from typing import Optional
-from PIL import Image
-from torchvision import transforms
-from torchvision.models import densenet121
+import numpy as np
+
+# Force CPU — MPS hang sur macOS récent avec certaines versions de PyTorch
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ["PYTORCH_NO_MPS"] = "1"
+
+import torch  # noqa: E402
+import torch.nn as nn  # noqa: E402
+from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.security import APIKeyHeader  # noqa: E402
+from pathlib import Path  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+from typing import Optional  # noqa: E402
+from PIL import Image  # noqa: E402
+from torchvision import transforms  # noqa: E402
+from torchvision.models import densenet121  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-# Détection du device
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-elif torch.cuda.is_available():
-    DEVICE = torch.device("cuda")
-else:
-    DEVICE = torch.device("cpu")
+# Force CPU (MPS désactivé — hang sur macOS récent)
+DEVICE = torch.device("cpu")
 
 print(f"Using device: {DEVICE}")
 
@@ -102,19 +104,46 @@ async def require_api_key(api_key: str = Security(_api_key_header)):
         raise HTTPException(status_code=401, detail="Clé API invalide ou absente.")
 
 
-def _log_prediction(image_name: str, predicted_class: str, confidence: float) -> Optional[int]:
+def _extract_image_stats(image: Image.Image) -> dict:
+    """Extrait les stats image pour le monitoring de data drift."""
+    import numpy as np
+    arr = np.array(image.convert("RGB"), dtype=np.float32)
+    gray = arr.mean(axis=2)
+    return {
+        "mean_brightness": float(gray.mean()),
+        "std_brightness":  float(gray.std()),
+        "mean_r": float(arr[:, :, 0].mean()),
+        "mean_g": float(arr[:, :, 1].mean()),
+        "mean_b": float(arr[:, :, 2].mean()),
+        "image_width":  image.size[0],
+        "image_height": image.size[1],
+    }
+
+
+def _log_prediction(
+    image_name: str, predicted_class: str, confidence: float, image: Image.Image = None
+) -> Optional[int]:
     """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
     Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
     try:
         from src.auth.db import get_connection
+        stats = _extract_image_stats(image) if image is not None else {}
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO predictions (image_name, predicted_class, confidence, model_version)
-            VALUES (%s, %s, %s, %s) RETURNING id
+            INSERT INTO predictions
+                (image_name, predicted_class, confidence, model_version,
+                 mean_brightness, std_brightness, mean_r, mean_g, mean_b,
+                 image_width, image_height)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
-            (image_name, predicted_class, confidence, model_version),
+            (
+                image_name, predicted_class, confidence, model_version,
+                stats.get("mean_brightness"), stats.get("std_brightness"),
+                stats.get("mean_r"), stats.get("mean_g"), stats.get("mean_b"),
+                stats.get("image_width"), stats.get("image_height"),
+            ),
         )
         prediction_id = cur.fetchone()[0]
         conn.commit()
@@ -175,17 +204,19 @@ def _load_from_file():
 
 
 def load_model():
-    """Charge le modèle — MLflow Registry @production en priorité, .pth local en fallback."""
+    """Charge le modèle — .pth local en priorité, MLflow Registry en fallback."""
     global model, model_device
 
     if model is not None:
         return model
 
     try:
-        model = _load_from_registry()
-    except Exception as exc:
-        print(f"[warn] MLflow Registry indisponible ({exc}) — fallback .pth local")
         model = _load_from_file()
+    except Exception:
+        try:
+            model = _load_from_registry()
+        except Exception as exc:
+            raise RuntimeError(f"Impossible de charger le modèle : {exc}")
 
     model_device = DEVICE
     return model
@@ -262,7 +293,7 @@ async def predict(file: UploadFile = File(...)):
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
-        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3))
+        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3), image)
 
         return {
             "prediction_id": prediction_id,
@@ -279,6 +310,78 @@ async def predict(file: UploadFile = File(...)):
             "error": str(e),
             "message": "Prédiction échouée"
         }
+
+
+@app.post("/gradcam", tags=["Inférence"], dependencies=[Depends(require_api_key)])
+async def gradcam_predict(file: UploadFile = File(...)):
+    """
+    Prédiction + GradCAM pour une image.
+
+    Returns:
+    {
+        "prediction_id": 42,
+        "predicted_class": "Lymphocyte",
+        "confidence": 0.987,
+        "is_critical": false,
+        "all_probas": {...},
+        "gradcam_b64": "<base64 PNG 224x224>"
+    }
+    """
+    try:
+        from pytorch_grad_cam import GradCAMPlusPlus as GradCAMLib
+        from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+        from pytorch_grad_cam.utils.image import show_cam_on_image
+
+        m = load_model()
+
+        image_data = await file.read()
+        pil_img = Image.open(io.BytesIO(image_data)).convert("RGB")
+
+        img_224 = pil_img.resize((224, 224))
+        img_array = np.array(img_224, dtype=np.float32) / 255.0
+
+        img_tensor = transform(pil_img).unsqueeze(0).to(DEVICE)
+
+        with torch.no_grad():
+            outputs = m(img_tensor)
+            probs = torch.softmax(outputs, dim=1)
+            pred_idx = int(torch.argmax(probs).item())
+            confidence = float(probs[0, pred_idx].item())
+
+        all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
+
+        try:
+            target_layer = m.features.norm5
+        except AttributeError:
+            target_layer = list(m.features.children())[-1]
+
+        cam_obj = GradCAMLib(model=m, target_layers=[target_layer])
+        grayscale_cam = cam_obj(
+            input_tensor=img_tensor,
+            targets=[ClassifierOutputTarget(pred_idx)],
+        )
+        del cam_obj
+
+        visualization = show_cam_on_image(img_array, grayscale_cam[0], use_rgb=True)
+
+        buf = io.BytesIO()
+        Image.fromarray(visualization).save(buf, format="PNG")
+        gradcam_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        prediction_id = _log_prediction(file.filename, CLASSES[pred_idx], round(confidence, 3))
+
+        return {
+            "prediction_id": prediction_id,
+            "predicted_class": CLASSES[pred_idx],
+            "confidence": round(confidence, 3),
+            "is_critical": CLASSES[pred_idx] in {"Erythroblast", "IG"},
+            "all_probas": all_probas,
+            "gradcam_b64": gradcam_b64,
+        }
+
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"{e}\n{traceback.format_exc()}")
 
 
 class FeedbackPayload(BaseModel):
