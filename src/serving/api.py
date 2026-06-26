@@ -204,17 +204,17 @@ def _load_from_file():
 
 
 def load_model():
-    """Charge le modèle — .pth local en priorité, MLflow Registry en fallback."""
+    """Charge le modèle — MLflow Registry @production en priorité, .pth local en fallback."""
     global model, model_device
 
     if model is not None:
         return model
 
     try:
-        model = _load_from_file()
+        model = _load_from_registry()
     except Exception:
         try:
-            model = _load_from_registry()
+            model = _load_from_file()
         except Exception as exc:
             raise RuntimeError(f"Impossible de charger le modèle : {exc}")
 
