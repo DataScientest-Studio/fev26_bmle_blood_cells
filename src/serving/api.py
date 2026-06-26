@@ -6,10 +6,12 @@ Lancement :
     uvicorn src.serving.api:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import base64
 import io
 import os
 import sys
 import time
+import numpy as np
 
 # Force CPU — MPS hang sur macOS récent avec certaines versions de PyTorch
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -308,6 +310,78 @@ async def predict(file: UploadFile = File(...)):
             "error": str(e),
             "message": "Prédiction échouée"
         }
+
+
+@app.post("/gradcam", tags=["Inférence"], dependencies=[Depends(require_api_key)])
+async def gradcam_predict(file: UploadFile = File(...)):
+    """
+    Prédiction + GradCAM pour une image.
+
+    Returns:
+    {
+        "prediction_id": 42,
+        "predicted_class": "Lymphocyte",
+        "confidence": 0.987,
+        "is_critical": false,
+        "all_probas": {...},
+        "gradcam_b64": "<base64 PNG 224x224>"
+    }
+    """
+    try:
+        from pytorch_grad_cam import GradCAMPlusPlus as GradCAMLib
+        from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+        from pytorch_grad_cam.utils.image import show_cam_on_image
+
+        m = load_model()
+
+        image_data = await file.read()
+        pil_img = Image.open(io.BytesIO(image_data)).convert("RGB")
+
+        img_224 = pil_img.resize((224, 224))
+        img_array = np.array(img_224, dtype=np.float32) / 255.0
+
+        img_tensor = transform(pil_img).unsqueeze(0).to(DEVICE)
+
+        with torch.no_grad():
+            outputs = m(img_tensor)
+            probs = torch.softmax(outputs, dim=1)
+            pred_idx = int(torch.argmax(probs).item())
+            confidence = float(probs[0, pred_idx].item())
+
+        all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
+
+        try:
+            target_layer = m.features.norm5
+        except AttributeError:
+            target_layer = list(m.features.children())[-1]
+
+        cam_obj = GradCAMLib(model=m, target_layers=[target_layer])
+        grayscale_cam = cam_obj(
+            input_tensor=img_tensor,
+            targets=[ClassifierOutputTarget(pred_idx)],
+        )
+        del cam_obj
+
+        visualization = show_cam_on_image(img_array, grayscale_cam[0], use_rgb=True)
+
+        buf = io.BytesIO()
+        Image.fromarray(visualization).save(buf, format="PNG")
+        gradcam_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        prediction_id = _log_prediction(file.filename, CLASSES[pred_idx], round(confidence, 3))
+
+        return {
+            "prediction_id": prediction_id,
+            "predicted_class": CLASSES[pred_idx],
+            "confidence": round(confidence, 3),
+            "is_critical": CLASSES[pred_idx] in {"Erythroblast", "IG"},
+            "all_probas": all_probas,
+            "gradcam_b64": gradcam_b64,
+        }
+
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"{e}\n{traceback.format_exc()}")
 
 
 class FeedbackPayload(BaseModel):
