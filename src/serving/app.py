@@ -474,9 +474,9 @@ def _show_cell_detail(res: dict, idx: int) -> None:
             st.markdown(
                 f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">'
                 f'<span style="width:50px;font-size:0.78rem;font-weight:700;color:{c};">'
-                f'{CLASS_ABBR.get(cls,"?")}{warn}</span>'
+                f'{CLASS_ABBR.get(cls, "?")}{warn}</span>'
                 f'<div style="flex:1;background:#F1F5F9;border-radius:4px;height:8px;">'
-                f'<div style="width:{min(prob*100,100):.1f}%;background:{c};'
+                f'<div style="width:{min(prob*100, 100):.1f}%;background:{c};'
                 f'height:8px;border-radius:4px;"></div></div>'
                 f'<span style="font-size:0.78rem;color:#374151;width:40px;text-align:right;">'
                 f'{prob*100:.1f}%</span></div>',
@@ -646,8 +646,10 @@ def show_classification_tab() -> None:
                 )
                 st.image(_b64_to_pil(res["gradcam_b64"]), use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown(_class_badge_html(res["predicted_class"], res["confidence"]),
-                             unsafe_allow_html=True)
+                st.markdown(
+                    _class_badge_html(res["predicted_class"], res["confidence"]),
+                    unsafe_allow_html=True,
+                )
                 if st.button(
                     "Détail",
                     key=f"sel_{abs_i}",
