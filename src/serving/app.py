@@ -411,7 +411,7 @@ def login_screen() -> bool:
         if submitted:
             try:
                 ok = verify_user(username, password)
-            except Exception:
+            except Exception as e:
                 # Supabase injoignable — fallback dev local (DEV_MODE=1 dans .env)
                 if os.getenv("DEV_MODE") == "1":
                     ok = (username == "dev" and password == "dev")
@@ -781,13 +781,20 @@ def show_logs_tab() -> None:
     if status_filter != "Tous":
         filtered = filtered[filtered["status"] == status_filter]
 
+    col_order = [
+        "mlflow_run_id", "model_name", "generation", "git_commit",
+        "device", "status", "started_at", "duration_seconds",
+        "cpu_percent_avg", "ram_used_mb_avg", "gpu_name",
+        "gpu_util_percent_avg", "gpu_mem_used_mb_avg", "macro_f1", "accuracy",
+    ]
+    col_order = [c for c in col_order if c in filtered.columns]
     st.dataframe(
-        filtered,
+        filtered[col_order],
         column_config={
             "mlflow_run_id":       "Run ID",
             "model_name":          "Modèle",
             "generation":          "Génération",
-            "fold":                "Fold",
+            "git_commit":          st.column_config.TextColumn("Commit Git"),
             "device":              "Device",
             "status":              "Statut",
             "started_at":          st.column_config.DatetimeColumn("Démarré le"),
@@ -799,7 +806,6 @@ def show_logs_tab() -> None:
             "gpu_mem_used_mb_avg": st.column_config.NumberColumn("GPU mem (Mo)", format="%.0f"),
             "macro_f1":            st.column_config.NumberColumn("macro_f1", format="%.4f"),
             "accuracy":            st.column_config.NumberColumn("accuracy", format="%.4f"),
-            "git_commit":          st.column_config.TextColumn("Commit Git"),
         },
         use_container_width=True,
         hide_index=True,
