@@ -16,6 +16,7 @@ shap==0.51.0
 imbalanced-learn==0.14.1
 
 mlflow==3.13.0
+evidently==0.7.21
 
 dvc==3.67.1
 dvc-http==2.32.0
