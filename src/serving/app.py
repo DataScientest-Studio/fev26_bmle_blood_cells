@@ -428,7 +428,7 @@ def login_screen() -> bool:
         if submitted:
             try:
                 ok = verify_user(username, password)
-            except Exception as e:
+            except Exception:
                 # Supabase injoignable — fallback dev local (DEV_MODE=1 dans .env)
                 if os.getenv("DEV_MODE") == "1":
                     ok = bool(username and password)
