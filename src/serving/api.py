@@ -19,7 +19,7 @@ os.environ["PYTORCH_NO_MPS"] = "1"
 
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
-from fastapi import FastAPI, File, UploadFile, HTTPException, Security, Depends  # noqa: E402
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Security, Depends  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.security import APIKeyHeader  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -121,7 +121,8 @@ def _extract_image_stats(image: Image.Image) -> dict:
 
 
 def _log_prediction(
-    image_name: str, predicted_class: str, confidence: float, image: Image.Image = None
+    image_name: str, predicted_class: str, confidence: float, image: Image.Image = None,
+    patient_id: Optional[int] = None,
 ) -> Optional[int]:
     """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
     Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
@@ -135,14 +136,14 @@ def _log_prediction(
             INSERT INTO predictions
                 (image_name, predicted_class, confidence, model_version,
                  mean_brightness, std_brightness, mean_r, mean_g, mean_b,
-                 image_width, image_height)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                 image_width, image_height, patient_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 image_name, predicted_class, confidence, model_version,
                 stats.get("mean_brightness"), stats.get("std_brightness"),
                 stats.get("mean_r"), stats.get("mean_g"), stats.get("mean_b"),
-                stats.get("image_width"), stats.get("image_height"),
+                stats.get("image_width"), stats.get("image_height"), patient_id,
             ),
         )
         prediction_id = cur.fetchone()[0]
@@ -250,7 +251,7 @@ async def root():
 
 
 @app.post("/predict", tags=["Inférence"], dependencies=[Depends(require_api_key)])
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), patient_id: Optional[int] = Form(None)):
     """
     Prédiction DL sur une image uploadée.
 
@@ -293,7 +294,9 @@ async def predict(file: UploadFile = File(...)):
         # Toutes les probabilités
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
-        prediction_id = _log_prediction(file.filename, pred_label, round(pred_confidence, 3), image)
+        prediction_id = _log_prediction(
+            file.filename, pred_label, round(pred_confidence, 3), image, patient_id=patient_id,
+        )
 
         return {
             "prediction_id": prediction_id,
@@ -313,7 +316,7 @@ async def predict(file: UploadFile = File(...)):
 
 
 @app.post("/gradcam", tags=["Inférence"], dependencies=[Depends(require_api_key)])
-async def gradcam_predict(file: UploadFile = File(...)):
+async def gradcam_predict(file: UploadFile = File(...), patient_id: Optional[int] = Form(None)):
     """
     Prédiction + GradCAM pour une image.
 
@@ -368,7 +371,9 @@ async def gradcam_predict(file: UploadFile = File(...)):
         Image.fromarray(visualization).save(buf, format="PNG")
         gradcam_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        prediction_id = _log_prediction(file.filename, CLASSES[pred_idx], round(confidence, 3))
+        prediction_id = _log_prediction(
+            file.filename, CLASSES[pred_idx], round(confidence, 3), patient_id=patient_id,
+        )
 
         return {
             "prediction_id": prediction_id,

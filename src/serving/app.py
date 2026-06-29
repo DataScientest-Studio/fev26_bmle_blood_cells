@@ -202,7 +202,7 @@ def _api_headers() -> dict:
     return {}
 
 
-def gradcam_predict(image: Image.Image, filename: str = "cell.png") -> dict:
+def gradcam_predict(image: Image.Image, filename: str = "cell.png", patient_id: int = None) -> dict:
     """Appelle /gradcam : retourne prédiction + GradCAM base64."""
     try:
         buf = io.BytesIO()
@@ -211,6 +211,7 @@ def gradcam_predict(image: Image.Image, filename: str = "cell.png") -> dict:
         resp = requests.post(
             f"{API_URL}/gradcam",
             files={"file": (filename, buf, "image/png")},
+            data={"patient_id": patient_id} if patient_id is not None else None,
             headers=_api_headers(),
             timeout=60,
         )
@@ -330,6 +331,53 @@ def fetch_class_confidence(window_days: int = 180) -> pd.DataFrame:
     if not df.empty:
         df["confidence_pct"] = 100 * (1 - df["corrections"] / df["total_predictions"])
     return df
+
+
+def next_patient_id() -> int:
+    """Numero de patient suivant — simule un nouveau patient par lot d'images analyse
+    (pas de vrais patients : un lot = un frottis = un patient)."""
+    conn = psycopg2.connect(
+        host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 6543)),
+        dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
+        password=os.getenv("SUPABASE_PASSWORD"), connect_timeout=10, sslmode="require",
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(MAX(patient_id), 0) + 1 FROM predictions")
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def search_predictions(image_name: str = "", patient_id: int = None) -> pd.DataFrame:
+    """Recherche dans les predictions par nom d'image (partiel) et/ou par patient."""
+    conn = psycopg2.connect(
+        host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 6543)),
+        dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
+        password=os.getenv("SUPABASE_PASSWORD"), connect_timeout=10, sslmode="require",
+    )
+    try:
+        cur = conn.cursor()
+        clauses, params = [], []
+        if image_name:
+            clauses.append("image_name ILIKE %s")
+            params.append(f"%{image_name}%")
+        if patient_id is not None:
+            clauses.append("patient_id = %s")
+            params.append(patient_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cur.execute(f"""
+            SELECT id, patient_id, image_name, predicted_class, confidence,
+                   model_version, created_at
+            FROM predictions
+            {where}
+            ORDER BY created_at DESC
+            LIMIT 200
+        """, params)
+        cols = [d[0] for d in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        conn.close()
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
@@ -577,6 +625,11 @@ def show_classification_tab() -> None:
         st.session_state.pop("batch_results", None)
         st.session_state.pop("selected_idx", None)
 
+        try:
+            patient_id = next_patient_id()
+        except Exception:
+            patient_id = None
+
         results = []
         progress = st.progress(0, text="Initialisation…")
         status = st.empty()
@@ -584,8 +637,9 @@ def show_classification_tab() -> None:
         for i, f in enumerate(uploaded_files[:n_files]):
             status.caption(f"Analyse de {f.name}  ({i + 1}/{n_files})")
             img = Image.open(f).convert("RGB")
-            res = gradcam_predict(img, f.name)
+            res = gradcam_predict(img, f.name, patient_id=patient_id)
             res["filename"] = f.name
+            res["patient_id"] = patient_id
             res["original_img_b64"] = _pil_to_b64(img.resize((224, 224)))
             results.append(res)
             progress.progress((i + 1) / n_files, text=f"{i + 1}/{n_files} analysées")
@@ -600,8 +654,11 @@ def show_classification_tab() -> None:
 
     results = st.session_state["batch_results"]
     selected_idx = st.session_state.get("selected_idx")
+    batch_patient_id = next((r["patient_id"] for r in results if r.get("patient_id")), None)
 
     st.divider()
+    if batch_patient_id is not None:
+        st.caption(f"🧑‍⚕️ Patient {batch_patient_id} — lot de {len(results)} images")
 
     # Résumé
     n_ok = sum(1 for r in results if "predicted_class" in r)
@@ -782,6 +839,66 @@ def show_monitoring_tab() -> None:
     """, unsafe_allow_html=True)
 
 
+def show_search_tab() -> None:
+    """Onglet Recherche : retrouver des predictions par nom d'image ou par patient
+    (patient simule — un lot d'images analyse = un patient, cf. show_classification_tab)."""
+    st.subheader("Recherche de predictions")
+    st.caption(
+        "Patients simules : chaque lot analyse dans l'onglet Classification "
+        "est associe a un nouveau numero de patient."
+    )
+
+    col_name, col_patient, col_search = st.columns([3, 1, 1])
+    with col_name:
+        image_name = st.text_input("Nom d'image (recherche partielle)", value="")
+    with col_patient:
+        patient_id_input = st.text_input("N° patient", value="")
+    with col_search:
+        st.write("")
+        search_btn = st.button("Rechercher", type="primary", use_container_width=True)
+
+    if not search_btn and "search_results" not in st.session_state:
+        st.info("Renseigne un nom d'image et/ou un numero de patient, puis clique sur Rechercher.")
+        return
+
+    if search_btn:
+        patient_id = None
+        if patient_id_input.strip():
+            try:
+                patient_id = int(patient_id_input.strip())
+            except ValueError:
+                st.error("Le numero de patient doit etre un entier.")
+                return
+        try:
+            st.session_state["search_results"] = search_predictions(
+                image_name=image_name.strip(), patient_id=patient_id,
+            )
+        except Exception as e:
+            st.error(f"Recherche impossible : {e}")
+            return
+
+    df = st.session_state.get("search_results")
+    if df is None or df.empty:
+        st.info("Aucun resultat.")
+        return
+
+    st.caption(f"{len(df)} resultat(s) (200 max)")
+    df_display = df.rename(columns={
+        "id": "ID",
+        "patient_id": "Patient",
+        "image_name": "Image",
+        "predicted_class": "Classe predite",
+        "confidence": "Confiance",
+        "model_version": "Version modele",
+        "created_at": "Date",
+    })
+    st.dataframe(
+        df_display.style.format({"Confiance": "{:.1%}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 _DRIFT_LEVELS = {
@@ -846,7 +963,8 @@ def show_drift_tab() -> None:
 
     # ── Metriques cles ────────────────────────────────────────────────────────
     st.subheader("Resume")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    metrics = result.get("metrics", {})
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Reference", f"{result.get('n_reference', 0)} imgs")
     c2.metric("Production", f"{result.get('n_current', 0)} predictions")
     c3.metric("Features driftees", result.get("n_drifted_features", 0))
@@ -865,10 +983,29 @@ def show_drift_tab() -> None:
         delta=_DRIFT_LEVELS[pred_level][0],
         delta_color="off",
     )
+    confidence_drift = metrics.get("prediction_drift", {}).get("confidence_drift")
+    c6.metric(
+        "Drift de confidence",
+        f"{confidence_drift:.3f}" if confidence_drift is not None else "N/A",
+    )
+
+    # Detail du data drift par feature
+    per_feature = metrics.get("data_drift", {}).get("per_feature", {})
+    if per_feature:
+        with st.expander("Detail du data drift par feature"):
+            df_feat = pd.DataFrame([
+                {
+                    "Feature": feat,
+                    "Drift detecte": "Oui" if vals.get("drift_detected") else "Non",
+                    "Score": vals.get("drift_score", 0.0),
+                    "Test statistique": vals.get("stattest", ""),
+                }
+                for feat, vals in per_feature.items()
+            ]).sort_values("Score", ascending=False)
+            st.dataframe(df_feat, use_container_width=True, hide_index=True)
 
     # Model drift (feedback medecin)
     model_score = result.get("model_drift_score")
-    metrics = result.get("metrics", {})
     model_metrics = metrics.get("model_drift", {})
     if model_score is not None:
         st.divider()
@@ -1064,6 +1201,42 @@ def show_drift_tab() -> None:
                             use_container_width=True,
                         )
 
+    # ── Matrice de confusion ──────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Matrice de confusion")
+    try:
+        from src.evidently.drift_report import list_confusion_generations, load_confusion_matrix
+        generations = list_confusion_generations()
+    except Exception as e:
+        generations = []
+        st.error(f"Impossible de lister les generations : {e}")
+
+    if not generations:
+        st.info("Aucune matrice de confusion disponible.")
+    else:
+        selected_gen = st.selectbox(
+            "Generation", generations, index=0, key="cm_generation",
+        )
+        cm_data = load_confusion_matrix(selected_gen)
+        if cm_data is None:
+            st.info(f"Aucune matrice pour la generation {selected_gen}.")
+        else:
+            import plotly.express as px
+            class_order = cm_data["class_order"]
+            fig_cm = px.imshow(
+                cm_data["matrix"],
+                x=class_order,
+                y=class_order,
+                text_auto=True,
+                color_continuous_scale="Blues",
+                labels=dict(x="Classe predite", y="Classe reelle", color="Nb"),
+            )
+            fig_cm.update_layout(
+                title=f"Generation {cm_data['generation']} — {cm_data['created_at']}",
+                height=500,
+            )
+            st.plotly_chart(fig_cm, use_container_width=True)
+
 
 def main() -> None:
     st.set_page_config(
@@ -1079,6 +1252,7 @@ def main() -> None:
 
     PAGES = {
         "Classification": ("🔬", show_classification_tab),
+        "Recherche":      ("🔍", show_search_tab),
         "Logs":           ("📋", show_logs_tab),
         "Monitoring":     ("📊", show_drift_tab),
     }
@@ -1106,6 +1280,7 @@ def main() -> None:
 
         NAV_OPTIONS = {
             "🔬  Classification": "Classification",
+            "🔍  Recherche":      "Recherche",
             "📋  Logs":           "Logs",
             "📊  Monitoring":     "Monitoring",
         }

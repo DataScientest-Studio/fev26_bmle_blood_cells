@@ -51,6 +51,7 @@ ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_g           FLOAT;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS mean_b           FLOAT;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS image_width      INTEGER;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS image_height     INTEGER;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS patient_id       INTEGER;
 """
 
 # Désaccord médecin sur une prédiction — relié à predictions.id
