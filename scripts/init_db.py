@@ -246,7 +246,7 @@ def _assign_splits(rows: list[dict], seed: int = 42) -> list[dict]:
     return result
 
 
-def populate_dataset(conn, data_dir: Path) -> None:
+def populate_dataset(conn, data_dir: Path, repopulate: bool = False, max_per_class: int = 300) -> None:
     rows = _collect_images(data_dir)
     if not rows:
         print(f"  [KO] Aucune image trouvée dans {data_dir}")
@@ -275,12 +275,21 @@ def populate_dataset(conn, data_dir: Path) -> None:
     print(f"       train={counts['train']}  val={counts['val']}  test={counts['test']}")
 
     print("\nCalcul des stats de référence pour le drift monitoring...")
-    _populate_reference_features(conn, data_dir, rows)
+    _populate_reference_features(conn, data_dir, rows, repopulate=repopulate, max_per_class=max_per_class)
 
 
-def _populate_reference_features(conn, data_dir: Path, rows: list[dict]) -> None:
-    """Calcule les stats image (brightness, RGB) par classe et les insère dans reference_features."""
+def _populate_reference_features(
+    conn, data_dir: Path, rows: list[dict],
+    repopulate: bool = False, max_per_class: int = 300,
+) -> None:
+    """Calcule les stats image (brightness, RGB) par image et les insère dans reference_features.
+
+    Une ligne par image (pas une moyenne par classe) pour que les tests statistiques
+    d'Evidently (KS, Wasserstein) aient une distribution réelle à comparer.
+    max_per_class : échantillon stratifié par classe (300 suffit pour KS/Wasserstein).
+    """
     try:
+        import random
         import numpy as np
         from PIL import Image as PILImage
     except ImportError:
@@ -289,62 +298,79 @@ def _populate_reference_features(conn, data_dir: Path, rows: list[dict]) -> None
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM reference_features")
-    if cur.fetchone()[0] > 0:
-        print("  [OK] reference_features déjà peuplée — ignorée")
+    n_existing = cur.fetchone()[0]
+    if n_existing > 0 and not repopulate:
+        print(f"  [OK] reference_features déjà peuplée ({n_existing} lignes) — ignorée (--repopulate pour forcer)")
         cur.close()
         return
 
+    if repopulate and n_existing > 0:
+        cur.execute("TRUNCATE TABLE reference_features RESTART IDENTITY")
+        print(f"  [OK] reference_features vidée ({n_existing} lignes supprimées)")
+
+    # Échantillon stratifié : max_per_class images par classe, tirage reproductible
+    rng = random.Random(42)
     by_class: dict[str, list] = {}
     for r in rows:
         by_class.setdefault(r["true_class"], []).append(r)
 
-    inserted = 0
+    sampled: list[dict] = []
     for cls, items in by_class.items():
-        cls_dir = data_dir / cls
-        stats_list = []
-        for r in items:
-            img_path = cls_dir / r["image_name"]
-            if not img_path.exists():
-                continue
-            try:
-                img = PILImage.open(img_path).convert("RGB")
-                arr = np.array(img, dtype=np.float32)
-                gray = arr.mean(axis=2)
-                stats_list.append({
-                    "mean_brightness": float(gray.mean()),
-                    "std_brightness":  float(gray.std()),
-                    "mean_r": float(arr[:, :, 0].mean()),
-                    "mean_g": float(arr[:, :, 1].mean()),
-                    "mean_b": float(arr[:, :, 2].mean()),
-                    "image_width":  img.size[0],
-                    "image_height": img.size[1],
-                })
-            except Exception:
-                continue
+        sample = rng.sample(items, min(max_per_class, len(items)))
+        sampled.extend(sample)
+        print(f"    {cls}: {len(sample)} images sélectionnées")
 
-        if not stats_list:
+    inserted = skipped = 0
+    BATCH = 200
+    batch = []
+
+    for r in sampled:
+        cls_dir = data_dir / r["true_class"]
+        img_path = cls_dir / r["image_name"]
+        if not img_path.exists():
+            skipped += 1
+            continue
+        try:
+            img = PILImage.open(img_path).convert("RGB")
+            arr = np.array(img, dtype=np.float32)
+            gray = arr.mean(axis=2)
+            batch.append((
+                r["true_class"],
+                float(gray.mean()),
+                float(gray.std()),
+                float(arr[:, :, 0].mean()),
+                float(arr[:, :, 1].mean()),
+                float(arr[:, :, 2].mean()),
+                int(img.size[0]),
+                int(img.size[1]),
+            ))
+        except Exception:
+            skipped += 1
             continue
 
-        cur.execute("""
+        if len(batch) >= BATCH:
+            cur.executemany("""
+                INSERT INTO reference_features
+                    (class_name, mean_brightness, std_brightness,
+                     mean_r, mean_g, mean_b, image_width, image_height)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, batch)
+            inserted += len(batch)
+            batch = []
+            print(f"    {inserted} images insérées...", end="\r")
+
+    if batch:
+        cur.executemany("""
             INSERT INTO reference_features
                 (class_name, mean_brightness, std_brightness,
                  mean_r, mean_g, mean_b, image_width, image_height)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            cls,
-            float(np.mean([s["mean_brightness"] for s in stats_list])),
-            float(np.mean([s["std_brightness"]  for s in stats_list])),
-            float(np.mean([s["mean_r"]          for s in stats_list])),
-            float(np.mean([s["mean_g"]          for s in stats_list])),
-            float(np.mean([s["mean_b"]          for s in stats_list])),
-            int(np.median([s["image_width"]     for s in stats_list])),
-            int(np.median([s["image_height"]    for s in stats_list])),
-        ))
-        inserted += 1
+        """, batch)
+        inserted += len(batch)
 
     conn.commit()
     cur.close()
-    print(f"  [OK] reference_features peuplée : {inserted} classe(s) insérée(s)")
+    print(f"  [OK] reference_features peuplée : {inserted} images insérées, {skipped} ignorées")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -353,7 +379,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Initialise les tables Supabase")
     parser.add_argument(
         "--populate", metavar="DATA_DIR",
-        help="Dossier contenant les sous-dossiers par classe (ex: data/Source_100)"
+        help="Dossier contenant les sous-dossiers par classe (ex: data/raw pour Source_full)"
+    )
+    parser.add_argument(
+        "--repopulate", action="store_true",
+        help="Vide et recrée reference_features (utile pour passer de Source_100 à Source_full)"
+    )
+    parser.add_argument(
+        "--max-per-class", type=int, default=300, metavar="N",
+        help="Nombre max d'images par classe pour reference_features (défaut: 300)"
     )
     args = parser.parse_args()
 
@@ -386,7 +420,7 @@ def main() -> None:
         if not data_dir.is_absolute():
             data_dir = ROOT / data_dir
         print(f"\nPopulation de dataset_images depuis {data_dir} ...")
-        populate_dataset(conn, data_dir)
+        populate_dataset(conn, data_dir, repopulate=args.repopulate, max_per_class=args.max_per_class)
 
     conn.close()
     print("\nTerminé.")

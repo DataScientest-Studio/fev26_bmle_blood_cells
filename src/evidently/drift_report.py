@@ -261,7 +261,7 @@ def generate_report(model_version: str | None = None) -> dict:
         RETURNING id
         """,
         (
-            model_version, len(ref_feat), len(cur_feat),
+            model_version, int(len(ref_feat)), int(len(cur_feat)),
             bool(data_drift_detected), float(data_drift_share),
             bool(pred_drift_detected), float(pred_drift_score),
             float(model_drift_score) if model_drift_score is not None else None,

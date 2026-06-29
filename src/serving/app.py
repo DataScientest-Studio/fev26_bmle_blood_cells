@@ -431,7 +431,7 @@ def login_screen() -> bool:
             except Exception:
                 # Supabase injoignable — fallback dev local (DEV_MODE=1 dans .env)
                 if os.getenv("DEV_MODE") == "1":
-                    ok = (username == "dev" and password == "dev")
+                    ok = bool(username and password)
                 else:
                     st.error("Base d'authentification indisponible. Activez DEV_MODE=1 pour le mode local.")
                     return False
@@ -944,10 +944,60 @@ def _level_badge(level: str) -> str:
 
 def show_drift_tab() -> None:
     """Onglet Drift : rapports Evidently de data drift et model drift."""
-    st.subheader("Monitoring du drift (IVDR 2017/746)")
-    st.caption(
-        "Seuils d'alerte : warning > 0.10 | alerte > 0.20 | critique > 0.30"
-    )
+    # CSS global pour forcer les labels en noir
+    st.markdown("""
+    <style>
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stNumberInput"] label {
+        color: #0f172a !important;
+        font-weight: 600 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<h2 style="color:#0f172a;font-weight:700;">Monitoring du drift (IVDR 2017/746)</h2>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;
+                  background:white;border-radius:10px;overflow:hidden;
+                  box-shadow:0 1px 4px rgba(0,0,0,0.07);border:1px solid #e2e8f0;">
+      <thead>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Niveau</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Score</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Signification</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Action IVDR</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span style="background:#dcfce7;color:#14532d;border:1px solid #16a34a;border-radius:6px;padding:3px 10px;font-weight:700;">✅ Normal</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">&lt; 0.10</td>
+          <td style="padding:10px 14px;color:#334155;">Aucun drift significatif</td>
+          <td style="padding:10px 14px;color:#334155;">Aucune action requise</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span style="background:#fef9c3;color:#713f12;border:1px solid #ca8a04;border-radius:6px;padding:3px 10px;font-weight:700;">⚠️ Warning</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.10 – 0.20</td>
+          <td style="padding:10px 14px;color:#334155;">Drift léger détecté</td>
+          <td style="padding:10px 14px;color:#334155;">Surveillance renforcée</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span style="background:#ffedd5;color:#7c2d12;border:1px solid #ea580c;border-radius:6px;padding:3px 10px;font-weight:700;">🟠 Alerte</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.20 – 0.30</td>
+          <td style="padding:10px 14px;color:#334155;">Drift modéré</td>
+          <td style="padding:10px 14px;color:#334155;">Analyse + envisager ré-entraînement (MDCG 2020-1)</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;"><span style="background:#fee2e2;color:#7f1d1d;border:1px solid #dc2626;border-radius:6px;padding:3px 10px;font-weight:700;">🔴 Critique</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">≥ 0.30</td>
+          <td style="padding:10px 14px;color:#334155;">Drift sévère</td>
+          <td style="padding:10px 14px;color:#334155;">Investigation immédiate obligatoire (ISO 14971 §9)</td>
+        </tr>
+      </tbody>
+    </table>
+    """, unsafe_allow_html=True)
 
     col_gen, col_ver = st.columns([2, 1])
     with col_ver:
@@ -988,106 +1038,18 @@ def show_drift_tab() -> None:
 
     st.divider()
 
-    # ── Metriques cles ────────────────────────────────────────────────────────
-    st.subheader("Resume")
-    metrics = result.get("metrics", {})
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Reference", f"{result.get('n_reference', 0)} imgs")
-    c2.metric("Production", f"{result.get('n_current', 0)} predictions")
-    c3.metric("Features driftees", result.get("n_drifted_features", 0))
-
-    data_level = result.get("data_drift_level", "unknown")
-    pred_level = result.get("pred_drift_level", "unknown")
-    c4.metric(
-        "Data drift",
-        f"{result.get('data_drift_score', 0):.3f}",
-        delta=_DRIFT_LEVELS[data_level][0],
-        delta_color="off",
-    )
-    c5.metric(
-        "Prediction drift",
-        f"{result.get('pred_drift_score', 0):.3f}",
-        delta=_DRIFT_LEVELS[pred_level][0],
-        delta_color="off",
-    )
-    confidence_drift = metrics.get("prediction_drift", {}).get("confidence_drift")
-    c6.metric(
-        "Drift de confidence",
-        f"{confidence_drift:.3f}" if confidence_drift is not None else "N/A",
-    )
-
-    # Detail du data drift par feature
-    per_feature = metrics.get("data_drift", {}).get("per_feature", {})
-    if per_feature:
-        with st.expander("Detail du data drift par feature"):
-            df_feat = pd.DataFrame([
-                {
-                    "Feature": feat,
-                    "Drift detecte": "Oui" if vals.get("drift_detected") else "Non",
-                    "Score": vals.get("drift_score", 0.0),
-                    "Test statistique": vals.get("stattest", ""),
-                }
-                for feat, vals in per_feature.items()
-            ]).sort_values("Score", ascending=False)
-            st.dataframe(df_feat, use_container_width=True, hide_index=True)
-
-    # Model drift (feedback medecin)
-    model_score = result.get("model_drift_score")
-    model_metrics = metrics.get("model_drift", {})
-    if model_score is not None:
-        st.divider()
-        st.subheader("Model drift (feedback medecin)")
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Feedbacks recus", model_metrics.get("n_feedback", 0))
-        mc2.metric("Taux accord medecin", f"{model_metrics.get('accuracy', 0)*100:.1f}%")
-        mc3.metric(
-            "Taux desaccord",
-            f"{model_metrics.get('disagree_rate', 0)*100:.1f}%",
-            delta="Alerte si > 10%",
-            delta_color="off",
-        )
-    else:
-        st.info("Model drift : aucun feedback medecin enregistre pour l'instant.")
-
-    # ── Alertes actives ───────────────────────────────────────────────────────
-    alerts = []
-    if result.get("data_drift_score", 0) >= 0.30:
-        alerts.append("CRITIQUE — Data drift score > 0.30 : investigation obligatoire.")
-    elif result.get("data_drift_score", 0) >= 0.20:
-        alerts.append("ALERTE — Data drift score > 0.20 : surveillance renforcee.")
-    elif result.get("data_drift_score", 0) >= 0.10:
-        alerts.append("WARNING — Data drift score > 0.10 : surveiller l'evolution.")
-
-    if result.get("pred_drift_score", 0) >= 0.20:
-        alerts.append("ALERTE — Distribution des classes predites a derive.")
-
-    if model_score is not None and model_score >= 0.15:
-        alerts.append("ALERTE — Taux de desaccord medecin > 15%.")
-    elif model_score is not None and model_score >= 0.10:
-        alerts.append("WARNING — Taux de desaccord medecin > 10%.")
-
-    if alerts:
-        st.divider()
-        for alert in alerts:
-            if alert.startswith("CRITIQUE"):
-                st.error(alert)
-            elif alert.startswith("ALERTE"):
-                st.warning(alert)
-            else:
-                st.info(alert)
-
-    # ── Rapport Evidently complet ─────────────────────────────────────────────
-    if result.get("report_html"):
-        st.divider()
-        st.subheader("Rapport Evidently complet")
-        if result.get("created_at"):
-            st.caption(f"Genere le : {result['created_at']} | Version modele : {result.get('model_version', 'toutes')}")
-        st.components.v1.html(result["report_html"], height=900, scrolling=True)
+    # ── Rapport showcase ──────────────────────────────────────────────────────
+    try:
+        from src.evidently.generate_showcase_report import build_showcase_html
+        showcase_html = build_showcase_html(result)
+        st.components.v1.html(showcase_html, height=1200, scrolling=True)
+    except Exception as e:
+        st.error(f"Erreur lors de la generation du rapport showcase : {e}")
 
     # ── Performance du modele (MLflow + Supabase class_metrics) ──────────────
     st.divider()
-    st.subheader("Performance du modele (MLflow)")
-    st.caption("Evolution de macro_F1 et accuracy par generation — seuil d'alerte IVDR : baisse > 5%")
+    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Performance du modele (MLflow)</h3>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#334155;font-size:14px;">Evolution de macro_F1 et accuracy par generation — seuil d\'alerte IVDR : baisse &gt; 5%</p>', unsafe_allow_html=True)
 
     load_perf = st.button("Charger les metriques de performance", key="load_perf")
     if load_perf or st.session_state.get("perf_data"):
@@ -1222,7 +1184,7 @@ def show_drift_tab() -> None:
                             "f1": "F1",
                             "support": "Support",
                         })
-                        st.caption(f"Generation {last_gen}")
+                        st.markdown(f'<p style="color:#334155;font-size:13px;">Génération : <strong style="color:#0f172a;">{last_gen}</strong></p>', unsafe_allow_html=True)
                         st.dataframe(
                             df_last.style.format({"Precision": "{:.4f}", "Recall": "{:.4f}", "F1": "{:.4f}"}),
                             use_container_width=True,
@@ -1230,7 +1192,7 @@ def show_drift_tab() -> None:
 
     # ── Matrice de confusion ──────────────────────────────────────────────────
     st.divider()
-    st.subheader("Matrice de confusion")
+    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Matrice de confusion</h3>', unsafe_allow_html=True)
     try:
         from src.evidently.drift_report import list_confusion_generations, load_confusion_matrix
         generations = list_confusion_generations()
@@ -1242,7 +1204,7 @@ def show_drift_tab() -> None:
         st.info("Aucune matrice de confusion disponible.")
     else:
         selected_gen = st.selectbox(
-            "Generation", generations, index=0, key="cm_generation",
+            "Génération", generations, index=0, key="cm_generation",
         )
         cm_data = load_confusion_matrix(selected_gen)
         if cm_data is None:
