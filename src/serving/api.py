@@ -122,7 +122,8 @@ def _extract_image_stats(image: Image.Image) -> dict:
 
 def _log_prediction(
     image_name: str, predicted_class: str, confidence: float, image: Image.Image = None,
-    patient_id: Optional[int] = None,
+    patient_id: Optional[int] = None, patient_name: Optional[str] = None,
+    triggered_by: Optional[str] = None,
 ) -> Optional[int]:
     """Logue la prédiction dans Supabase et retourne son id (None si indisponible).
     Échec silencieux — ne doit jamais faire échouer une prédiction réelle."""
@@ -136,14 +137,15 @@ def _log_prediction(
             INSERT INTO predictions
                 (image_name, predicted_class, confidence, model_version,
                  mean_brightness, std_brightness, mean_r, mean_g, mean_b,
-                 image_width, image_height, patient_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                 image_width, image_height, patient_id, patient_name, triggered_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 image_name, predicted_class, confidence, model_version,
                 stats.get("mean_brightness"), stats.get("std_brightness"),
                 stats.get("mean_r"), stats.get("mean_g"), stats.get("mean_b"),
-                stats.get("image_width"), stats.get("image_height"), patient_id,
+                stats.get("image_width"), stats.get("image_height"), patient_id, patient_name,
+                triggered_by,
             ),
         )
         prediction_id = cur.fetchone()[0]
@@ -251,7 +253,12 @@ async def root():
 
 
 @app.post("/predict", tags=["Inférence"], dependencies=[Depends(require_api_key)])
-async def predict(file: UploadFile = File(...), patient_id: Optional[int] = Form(None)):
+async def predict(
+    file: UploadFile = File(...),
+    patient_id: Optional[int] = Form(None),
+    patient_name: Optional[str] = Form(None),
+    triggered_by: Optional[str] = Form(None),
+):
     """
     Prédiction DL sur une image uploadée.
 
@@ -295,7 +302,8 @@ async def predict(file: UploadFile = File(...), patient_id: Optional[int] = Form
         all_probas = {CLASSES[i]: float(probs[0, i].item()) for i in range(NUM_CLASSES)}
 
         prediction_id = _log_prediction(
-            file.filename, pred_label, round(pred_confidence, 3), image, patient_id=patient_id,
+            file.filename, pred_label, round(pred_confidence, 3), image,
+            patient_id=patient_id, patient_name=patient_name, triggered_by=triggered_by,
         )
 
         return {
@@ -316,7 +324,12 @@ async def predict(file: UploadFile = File(...), patient_id: Optional[int] = Form
 
 
 @app.post("/gradcam", tags=["Inférence"], dependencies=[Depends(require_api_key)])
-async def gradcam_predict(file: UploadFile = File(...), patient_id: Optional[int] = Form(None)):
+async def gradcam_predict(
+    file: UploadFile = File(...),
+    patient_id: Optional[int] = Form(None),
+    patient_name: Optional[str] = Form(None),
+    triggered_by: Optional[str] = Form(None),
+):
     """
     Prédiction + GradCAM pour une image.
 
@@ -372,7 +385,8 @@ async def gradcam_predict(file: UploadFile = File(...), patient_id: Optional[int
         gradcam_b64 = base64.b64encode(buf.getvalue()).decode()
 
         prediction_id = _log_prediction(
-            file.filename, CLASSES[pred_idx], round(confidence, 3), patient_id=patient_id,
+            file.filename, CLASSES[pred_idx], round(confidence, 3),
+            patient_id=patient_id, patient_name=patient_name, triggered_by=triggered_by,
         )
 
         return {

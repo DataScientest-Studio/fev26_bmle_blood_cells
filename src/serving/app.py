@@ -202,16 +202,26 @@ def _api_headers() -> dict:
     return {}
 
 
-def gradcam_predict(image: Image.Image, filename: str = "cell.png", patient_id: int = None) -> dict:
+def gradcam_predict(
+    image: Image.Image, filename: str = "cell.png",
+    patient_id: int = None, patient_name: str = None, triggered_by: str = None,
+) -> dict:
     """Appelle /gradcam : retourne prédiction + GradCAM base64."""
     try:
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         buf.seek(0)
+        data = {}
+        if patient_id is not None:
+            data["patient_id"] = patient_id
+        if patient_name:
+            data["patient_name"] = patient_name
+        if triggered_by:
+            data["triggered_by"] = triggered_by
         resp = requests.post(
             f"{API_URL}/gradcam",
             files={"file": (filename, buf, "image/png")},
-            data={"patient_id": patient_id} if patient_id is not None else None,
+            data=data or None,
             headers=_api_headers(),
             timeout=60,
         )
@@ -274,7 +284,11 @@ def fetch_training_runs() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def fetch_mlflow_run_data() -> dict:
-    """Métriques + tag git_commit pour tous les runs MLflow."""
+    """Métriques + tag git_commit + version Registry pour tous les runs MLflow.
+
+    La "version" MLflow (compteur global, incrémenté à chaque enregistrement
+    dans le Registry) est différente de la "génération" (tag métier propre
+    au projet) — un même modèle a les deux, ne pas les confondre."""
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     client = MlflowClient()
     data = {}
@@ -285,6 +299,9 @@ def fetch_mlflow_run_data() -> dict:
                 "accuracy":   run.data.metrics.get("accuracy"),
                 "git_commit": run.data.tags.get("git_commit", ""),
             }
+    for mv in client.search_model_versions(f"name='{MLFLOW_MODEL_NAME}'"):
+        if mv.run_id in data:
+            data[mv.run_id]["mlflow_version"] = mv.version
     return data
 
 
@@ -349,8 +366,8 @@ def next_patient_id() -> int:
         conn.close()
 
 
-def search_predictions(image_name: str = "", patient_id: int = None) -> pd.DataFrame:
-    """Recherche dans les predictions par nom d'image (partiel) et/ou par patient."""
+def search_predictions(image_name: str = "", patient_name: str = "") -> pd.DataFrame:
+    """Recherche dans les predictions par nom d'image (partiel) et/ou par nom de patient (partiel)."""
     conn = psycopg2.connect(
         host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 6543)),
         dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
@@ -362,13 +379,13 @@ def search_predictions(image_name: str = "", patient_id: int = None) -> pd.DataF
         if image_name:
             clauses.append("image_name ILIKE %s")
             params.append(f"%{image_name}%")
-        if patient_id is not None:
-            clauses.append("patient_id = %s")
-            params.append(patient_id)
+        if patient_name:
+            clauses.append("patient_name ILIKE %s")
+            params.append(f"%{patient_name}%")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cur.execute(f"""
-            SELECT id, patient_id, image_name, predicted_class, confidence,
-                   model_version, created_at
+            SELECT id, patient_id, patient_name, image_name, predicted_class, confidence,
+                   model_version, triggered_by, created_at
             FROM predictions
             {where}
             ORDER BY created_at DESC
@@ -591,6 +608,11 @@ def show_classification_tab() -> None:
         unsafe_allow_html=True,
     )
 
+    patient_name_input = st.text_input(
+        "Nom du patient (optionnel)",
+        placeholder="Ex : GLPG_123456_20250907 — laissé vide, un nom générique sera attribué",
+    )
+
     col_up, col_sz, col_btn = st.columns([4, 1, 1])
     with col_up:
         uploaded_files = st.file_uploader(
@@ -629,6 +651,8 @@ def show_classification_tab() -> None:
             patient_id = next_patient_id()
         except Exception:
             patient_id = None
+        patient_name = patient_name_input.strip() or f"Patient {patient_id}"
+        triggered_by = st.session_state.get("username")
 
         results = []
         progress = st.progress(0, text="Initialisation…")
@@ -637,9 +661,13 @@ def show_classification_tab() -> None:
         for i, f in enumerate(uploaded_files[:n_files]):
             status.caption(f"Analyse de {f.name}  ({i + 1}/{n_files})")
             img = Image.open(f).convert("RGB")
-            res = gradcam_predict(img, f.name, patient_id=patient_id)
+            res = gradcam_predict(
+                img, f.name, patient_id=patient_id, patient_name=patient_name,
+                triggered_by=triggered_by,
+            )
             res["filename"] = f.name
             res["patient_id"] = patient_id
+            res["patient_name"] = patient_name
             res["original_img_b64"] = _pil_to_b64(img.resize((224, 224)))
             results.append(res)
             progress.progress((i + 1) / n_files, text=f"{i + 1}/{n_files} analysées")
@@ -654,11 +682,11 @@ def show_classification_tab() -> None:
 
     results = st.session_state["batch_results"]
     selected_idx = st.session_state.get("selected_idx")
-    batch_patient_id = next((r["patient_id"] for r in results if r.get("patient_id")), None)
+    batch_patient_name = next((r["patient_name"] for r in results if r.get("patient_name")), None)
 
     st.divider()
-    if batch_patient_id is not None:
-        st.caption(f"🧑‍⚕️ Patient {batch_patient_id} — lot de {len(results)} images")
+    if batch_patient_name is not None:
+        st.caption(f"🧑‍⚕️ {batch_patient_name} — lot de {len(results)} images")
 
     # Résumé
     n_ok = sum(1 for r in results if "predicted_class" in r)
@@ -747,9 +775,10 @@ def show_logs_tab() -> None:
     prod = fetch_production_version()
     run_data = fetch_mlflow_run_data()
 
-    runs["macro_f1"]   = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("macro_f1"))
-    runs["accuracy"]   = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("accuracy"))
-    runs["git_commit"] = runs["mlflow_run_id"].map(
+    runs["macro_f1"]      = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("macro_f1"))
+    runs["accuracy"]      = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("accuracy"))
+    runs["mlflow_version"] = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("mlflow_version"))
+    runs["git_commit"]    = runs["mlflow_run_id"].map(
         lambda r: (run_data.get(r, {}).get("git_commit") or "")[:10]
     )
 
@@ -760,8 +789,10 @@ def show_logs_tab() -> None:
     if prod:
         c4.metric(
             "@production",
-            f"v{prod['version']} ({prod['generation']})",
-            f"macro_f1={prod['macro_f1']:.4f}" if prod["macro_f1"] is not None else None,
+            f"version {prod['version']}",
+            f"génération {prod['generation']} · macro_f1={prod['macro_f1']:.4f}"
+            if prod["macro_f1"] is not None else f"génération {prod['generation']}",
+            delta_color="off",
         )
     else:
         c4.metric("@production", "—")
@@ -786,6 +817,7 @@ def show_logs_tab() -> None:
         column_config={
             "mlflow_run_id":       "Run ID",
             "model_name":          "Modèle",
+            "mlflow_version":      st.column_config.NumberColumn("Version MLflow", format="%d"),
             "generation":          "Génération",
             "fold":                "Fold",
             "device":              "Device",
@@ -840,38 +872,31 @@ def show_monitoring_tab() -> None:
 
 
 def show_search_tab() -> None:
-    """Onglet Recherche : retrouver des predictions par nom d'image ou par patient
+    """Onglet Recherche : retrouver des predictions par nom d'image ou par nom de patient
     (patient simule — un lot d'images analyse = un patient, cf. show_classification_tab)."""
     st.subheader("Recherche de predictions")
     st.caption(
         "Patients simules : chaque lot analyse dans l'onglet Classification "
-        "est associe a un nouveau numero de patient."
+        "est associe a un nom de patient (saisi, ou generique si laisse vide)."
     )
 
-    col_name, col_patient, col_search = st.columns([3, 1, 1])
+    col_name, col_patient, col_search = st.columns([3, 2, 1])
     with col_name:
         image_name = st.text_input("Nom d'image (recherche partielle)", value="")
     with col_patient:
-        patient_id_input = st.text_input("N° patient", value="")
+        patient_name_input = st.text_input("Nom du patient (recherche partielle)", value="")
     with col_search:
         st.write("")
         search_btn = st.button("Rechercher", type="primary", use_container_width=True)
 
     if not search_btn and "search_results" not in st.session_state:
-        st.info("Renseigne un nom d'image et/ou un numero de patient, puis clique sur Rechercher.")
+        st.info("Renseigne un nom d'image et/ou un nom de patient, puis clique sur Rechercher.")
         return
 
     if search_btn:
-        patient_id = None
-        if patient_id_input.strip():
-            try:
-                patient_id = int(patient_id_input.strip())
-            except ValueError:
-                st.error("Le numero de patient doit etre un entier.")
-                return
         try:
             st.session_state["search_results"] = search_predictions(
-                image_name=image_name.strip(), patient_id=patient_id,
+                image_name=image_name.strip(), patient_name=patient_name_input.strip(),
             )
         except Exception as e:
             st.error(f"Recherche impossible : {e}")
@@ -885,11 +910,13 @@ def show_search_tab() -> None:
     st.caption(f"{len(df)} resultat(s) (200 max)")
     df_display = df.rename(columns={
         "id": "ID",
-        "patient_id": "Patient",
+        "patient_id": "ID patient",
+        "patient_name": "Patient",
         "image_name": "Image",
         "predicted_class": "Classe predite",
         "confidence": "Confiance",
         "model_version": "Version modele",
+        "triggered_by": "Analyse par",
         "created_at": "Date",
     })
     st.dataframe(
