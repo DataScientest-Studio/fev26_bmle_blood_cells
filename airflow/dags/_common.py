@@ -29,17 +29,21 @@ def next_generation() -> str:
     return f"v{max_n + 1}"
 
 
-def next_tiff_batch(variable_name: str = "tiff_next_batch_idx") -> str | None:
-    """Determine le prochain lot TIFF a traiter (data/tiff_batches/batch_NNN),
-    en se basant sur une Airflow Variable persistee entre les runs planifies.
+def next_lotstiff_batch(variable_name: str = "lotstiff_next_batch_idx") -> str | None:
+    """Determine le prochain lot a traiter (data/lotstiff/batchN, tracke via DVC
+    sur DagsHub), en se basant sur une Airflow Variable persistee entre les
+    runs planifies.
 
     Retourne None si tous les lots disponibles ont deja ete utilises (fin de
     la simulation d'arrivee de nouvelles donnees)."""
     from pathlib import Path
     from airflow.models import Variable
 
-    batches_dir = Path(PROJECT_DIR) / "data" / "tiff_batches"
-    available = sorted(p.name for p in batches_dir.iterdir() if p.is_dir() and p.name.startswith("batch_"))
+    batches_dir = Path(PROJECT_DIR) / "data" / "lotstiff"
+    available = sorted(
+        (p.name for p in batches_dir.iterdir() if p.is_dir() and p.name.startswith("batch")),
+        key=lambda n: int(n[len("batch"):]),
+    )
 
     idx = int(Variable.get(variable_name, default_var="1"))
     if idx > len(available):

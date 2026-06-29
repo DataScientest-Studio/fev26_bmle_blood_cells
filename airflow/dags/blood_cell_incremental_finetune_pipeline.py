@@ -3,26 +3,26 @@ DAG Airflow — Fine-tuning incrémental sur un lot TIFF (générations V2+)
 
 Planifié chaque dimanche 4h (apres le DAG d'entrainement complet de 2h, pour
 ne pas se disputer le GPU Windows) : simule l'arrivee reguliere de nouvelles
-donnees en consommant un nouveau lot data/tiff_batches/batch_NNN a chaque
-execution (le prochain index est suivi via l'Airflow Variable
-tiff_next_batch_idx). Le numero de generation est lui aussi calcule
+donnees en consommant un nouveau lot data/lotstiff/batchN a chaque execution
+(le prochain index est suivi via l'Airflow Variable
+lotstiff_next_batch_idx). Le numero de generation est lui aussi calcule
 automatiquement (cf. next_generation() dans _common.py). Si tous les lots
 disponibles ont deja ete consommes, le DAG se termine sans rien faire.
 
 Declenchement manuel toujours possible avec batch/generation explicites
 (params, "Trigger DAG w/ config") pour rejouer un lot precis.
 
-Le lot est d'abord transféré vers le PC Windows (les liens symboliques de
-data/tiff_batches ne pointent que sur le filesystem du Mac), puis
-src/train/incremental_finetune.py charge le modèle @production courant, le
-fine-tune (avec un buffer de replay Mendeley pour éviter l'oubli
-catastrophique), évalue sur un set de référence, et décide lui-même de la
-promotion — ce DAG vérifie ensuite le résultat et synchronise si besoin.
+Le lot (data/lotstiff/batchN, tracke via DVC sur DagsHub — vraies copies,
+pas de symlinks) est d'abord recupere sur le PC Windows via git pull +
+dvc pull, puis src/train/incremental_finetune.py charge le modèle
+@production courant, le fine-tune (avec un buffer de replay Mendeley pour
+éviter l'oubli catastrophique), évalue sur un set de référence, et décide
+lui-même de la promotion — ce DAG vérifie ensuite le résultat et
+synchronise si besoin.
 """
 
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -35,8 +35,8 @@ from mlflow.tracking import MlflowClient
 import mlflow
 
 from _common import (
-    MLFLOW_TRACKING_URI, MODEL_NAME, PROJECT_DIR,
-    next_generation, next_tiff_batch, supabase_env_exports, sync_to_datalake,
+    MLFLOW_TRACKING_URI, MODEL_NAME,
+    next_generation, next_lotstiff_batch, supabase_env_exports, sync_to_datalake,
 )
 
 MAC_MLFLOW_TAILSCALE_URI = f"http://{os.environ['MAC_TAILSCALE_IP']}:5001"  # depuis le PC Windows
@@ -69,7 +69,7 @@ def _determine_batch_and_generation(**context):
     """Utilise les params si fournis explicitement (declenchement manuel),
     sinon calcule automatiquement le prochain lot/generation (run planifie)."""
     ti = context["ti"]
-    batch = context["params"].get("batch") or next_tiff_batch()
+    batch = context["params"].get("batch") or next_lotstiff_batch()
     if batch is None:
         raise AirflowSkipException("Tous les lots TIFF disponibles ont déjà été consommés.")
     generation = context["params"].get("generation") or next_generation()
@@ -86,50 +86,38 @@ determine_batch_and_generation = PythonOperator(
 )
 
 
-# ── Task 2 : Transférer le lot (résout les symlinks) vers le PC Windows ──────
+# ── Task 2 : Recuperer le lot depuis DagsHub (dvc pull) sur le PC Windows ────
 def _transfer_batch(**context):
-    """data/tiff_batches/<batch>/<classe>/*.tiff sont des symlinks vers
-    l'archive TCIA sur le Mac — inutilisables tels quels depuis le PC
-    Windows. On résout chaque lien et on transfère le contenu réel via SFTP."""
+    """data/lotstiff/<batch> est tracke via DVC sur DagsHub (vraies copies de
+    fichiers, pas de symlinks) -- on met a jour le repo Git distant puis on
+    tire les donnees avec dvc pull, directement depuis le PC Windows. Plus
+    besoin de resoudre des liens ni de SFTP fichier par fichier."""
     from airflow.providers.ssh.hooks.ssh import SSHHook
 
     batch_name = context["ti"].xcom_pull(task_ids="determine_batch_and_generation", key="batch")
-    local_batch_dir = Path(PROJECT_DIR) / "data" / "tiff_batches" / batch_name
-    if not local_batch_dir.is_dir():
-        raise FileNotFoundError(f"Lot introuvable : {local_batch_dir}")
-
-    remote_base = f"{WINDOWS_REPO_DIR}\\data\\tiff_batches\\{batch_name}"
     hook = SSHHook(ssh_conn_id=WINDOWS_SSH_CONN_ID)
     ssh_client = hook.get_conn()
 
     def run_remote(cmd):
         _, stdout, stderr = ssh_client.exec_command(cmd)
         status = stdout.channel.recv_exit_status()
+        out = stdout.read().decode("utf-8", errors="replace")
         if status != 0:
-            raise RuntimeError(f"Commande distante échouée ({status}) : {cmd}\n{stderr.read().decode()}")
+            err = stderr.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Commande distante échouée ({status}) : {cmd}\n{err}")
+        return out
 
-    run_remote(f"powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path '{remote_base}' | Out-Null\"")
-
-    sftp = ssh_client.open_sftp()
-    n_files = 0
     try:
-        for cls_dir in sorted(local_batch_dir.iterdir()):
-            if not cls_dir.is_dir():
-                continue
-            remote_cls_dir = f"{remote_base}\\{cls_dir.name}"
-            run_remote(
-                f"powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path '{remote_cls_dir}' | Out-Null\""
-            )
-            for img in cls_dir.iterdir():
-                if not img.is_file():
-                    continue
-                sftp.put(str(img.resolve()), f"{remote_cls_dir}\\{img.name}")
-                n_files += 1
+        run_remote(f"powershell -NoProfile -Command \"cd '{WINDOWS_REPO_DIR}'; git pull\"")
+        out = run_remote(
+            "powershell -NoProfile -Command "
+            f"\"cd '{WINDOWS_REPO_DIR}'; & '.venv\\Scripts\\python.exe' -m dvc pull "
+            f"'data/lotstiff/{batch_name}.dvc'\""
+        )
     finally:
-        sftp.close()
         ssh_client.close()
 
-    print(f"{n_files} images transférées vers {remote_base}")
+    print(out)
 
 
 transfer_batch = PythonOperator(
@@ -154,7 +142,7 @@ finetune = SSHOperator(
         f"{supabase_env_exports()}; "
         f"cd '{WINDOWS_REPO_DIR}'; "
         "& '.venv\\Scripts\\python.exe' -m src.train.incremental_finetune "
-        f"--batch-dir 'data/tiff_batches/{_XCOM_BATCH}' "
+        f"--batch-dir 'data/lotstiff/{_XCOM_BATCH}' "
         f"--generation '{_XCOM_GENERATION}'"
         "\""
     ),
