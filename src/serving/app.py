@@ -202,16 +202,26 @@ def _api_headers() -> dict:
     return {}
 
 
-def gradcam_predict(image: Image.Image, filename: str = "cell.png", patient_id: int = None) -> dict:
+def gradcam_predict(
+    image: Image.Image, filename: str = "cell.png",
+    patient_id: int = None, patient_name: str = None, triggered_by: str = None,
+) -> dict:
     """Appelle /gradcam : retourne prédiction + GradCAM base64."""
     try:
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         buf.seek(0)
+        data = {}
+        if patient_id is not None:
+            data["patient_id"] = patient_id
+        if patient_name:
+            data["patient_name"] = patient_name
+        if triggered_by:
+            data["triggered_by"] = triggered_by
         resp = requests.post(
             f"{API_URL}/gradcam",
             files={"file": (filename, buf, "image/png")},
-            data={"patient_id": patient_id} if patient_id is not None else None,
+            data=data or None,
             headers=_api_headers(),
             timeout=60,
         )
@@ -274,7 +284,11 @@ def fetch_training_runs() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def fetch_mlflow_run_data() -> dict:
-    """Métriques + tag git_commit pour tous les runs MLflow."""
+    """Métriques + tag git_commit + version Registry pour tous les runs MLflow.
+
+    La "version" MLflow (compteur global, incrémenté à chaque enregistrement
+    dans le Registry) est différente de la "génération" (tag métier propre
+    au projet) — un même modèle a les deux, ne pas les confondre."""
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     client = MlflowClient()
     data = {}
@@ -285,6 +299,9 @@ def fetch_mlflow_run_data() -> dict:
                 "accuracy":   run.data.metrics.get("accuracy"),
                 "git_commit": run.data.tags.get("git_commit", ""),
             }
+    for mv in client.search_model_versions(f"name='{MLFLOW_MODEL_NAME}'"):
+        if mv.run_id in data:
+            data[mv.run_id]["mlflow_version"] = mv.version
     return data
 
 
@@ -349,8 +366,8 @@ def next_patient_id() -> int:
         conn.close()
 
 
-def search_predictions(image_name: str = "", patient_id: int = None) -> pd.DataFrame:
-    """Recherche dans les predictions par nom d'image (partiel) et/ou par patient."""
+def search_predictions(image_name: str = "", patient_name: str = "") -> pd.DataFrame:
+    """Recherche dans les predictions par nom d'image (partiel) et/ou par nom de patient (partiel)."""
     conn = psycopg2.connect(
         host=os.getenv("SUPABASE_HOST"), port=int(os.getenv("SUPABASE_PORT", 6543)),
         dbname=os.getenv("SUPABASE_DB"), user=os.getenv("SUPABASE_USER"),
@@ -362,13 +379,13 @@ def search_predictions(image_name: str = "", patient_id: int = None) -> pd.DataF
         if image_name:
             clauses.append("image_name ILIKE %s")
             params.append(f"%{image_name}%")
-        if patient_id is not None:
-            clauses.append("patient_id = %s")
-            params.append(patient_id)
+        if patient_name:
+            clauses.append("patient_name ILIKE %s")
+            params.append(f"%{patient_name}%")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cur.execute(f"""
-            SELECT id, patient_id, image_name, predicted_class, confidence,
-                   model_version, created_at
+            SELECT id, patient_id, patient_name, image_name, predicted_class, confidence,
+                   model_version, triggered_by, created_at
             FROM predictions
             {where}
             ORDER BY created_at DESC
@@ -414,7 +431,7 @@ def login_screen() -> bool:
             except Exception as e:
                 # Supabase injoignable — fallback dev local (DEV_MODE=1 dans .env)
                 if os.getenv("DEV_MODE") == "1":
-                    ok = (username == "dev" and password == "dev")
+                    ok = bool(username and password)
                 else:
                     st.error("Base d'authentification indisponible. Activez DEV_MODE=1 pour le mode local.")
                     return False
@@ -591,6 +608,11 @@ def show_classification_tab() -> None:
         unsafe_allow_html=True,
     )
 
+    patient_name_input = st.text_input(
+        "Nom du patient (optionnel)",
+        placeholder="Ex : GLPG_123456_20250907 — laissé vide, un nom générique sera attribué",
+    )
+
     col_up, col_sz, col_btn = st.columns([4, 1, 1])
     with col_up:
         uploaded_files = st.file_uploader(
@@ -629,6 +651,8 @@ def show_classification_tab() -> None:
             patient_id = next_patient_id()
         except Exception:
             patient_id = None
+        patient_name = patient_name_input.strip() or f"Patient {patient_id}"
+        triggered_by = st.session_state.get("username")
 
         results = []
         progress = st.progress(0, text="Initialisation…")
@@ -637,9 +661,13 @@ def show_classification_tab() -> None:
         for i, f in enumerate(uploaded_files[:n_files]):
             status.caption(f"Analyse de {f.name}  ({i + 1}/{n_files})")
             img = Image.open(f).convert("RGB")
-            res = gradcam_predict(img, f.name, patient_id=patient_id)
+            res = gradcam_predict(
+                img, f.name, patient_id=patient_id, patient_name=patient_name,
+                triggered_by=triggered_by,
+            )
             res["filename"] = f.name
             res["patient_id"] = patient_id
+            res["patient_name"] = patient_name
             res["original_img_b64"] = _pil_to_b64(img.resize((224, 224)))
             results.append(res)
             progress.progress((i + 1) / n_files, text=f"{i + 1}/{n_files} analysées")
@@ -654,11 +682,11 @@ def show_classification_tab() -> None:
 
     results = st.session_state["batch_results"]
     selected_idx = st.session_state.get("selected_idx")
-    batch_patient_id = next((r["patient_id"] for r in results if r.get("patient_id")), None)
+    batch_patient_name = next((r["patient_name"] for r in results if r.get("patient_name")), None)
 
     st.divider()
-    if batch_patient_id is not None:
-        st.caption(f"🧑‍⚕️ Patient {batch_patient_id} — lot de {len(results)} images")
+    if batch_patient_name is not None:
+        st.caption(f"🧑‍⚕️ {batch_patient_name} — lot de {len(results)} images")
 
     # Résumé
     n_ok = sum(1 for r in results if "predicted_class" in r)
@@ -747,9 +775,10 @@ def show_logs_tab() -> None:
     prod = fetch_production_version()
     run_data = fetch_mlflow_run_data()
 
-    runs["macro_f1"]   = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("macro_f1"))
-    runs["accuracy"]   = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("accuracy"))
-    runs["git_commit"] = runs["mlflow_run_id"].map(
+    runs["macro_f1"]      = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("macro_f1"))
+    runs["accuracy"]      = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("accuracy"))
+    runs["mlflow_version"] = runs["mlflow_run_id"].map(lambda r: run_data.get(r, {}).get("mlflow_version"))
+    runs["git_commit"]    = runs["mlflow_run_id"].map(
         lambda r: (run_data.get(r, {}).get("git_commit") or "")[:10]
     )
 
@@ -760,8 +789,10 @@ def show_logs_tab() -> None:
     if prod:
         c4.metric(
             "@production",
-            f"v{prod['version']} ({prod['generation']})",
-            f"macro_f1={prod['macro_f1']:.4f}" if prod["macro_f1"] is not None else None,
+            f"version {prod['version']}",
+            f"génération {prod['generation']} · macro_f1={prod['macro_f1']:.4f}"
+            if prod["macro_f1"] is not None else f"génération {prod['generation']}",
+            delta_color="off",
         )
     else:
         c4.metric("@production", "—")
@@ -793,6 +824,7 @@ def show_logs_tab() -> None:
         column_config={
             "mlflow_run_id":       "Run ID",
             "model_name":          "Modèle",
+            "mlflow_version":      st.column_config.NumberColumn("Version MLflow", format="%d"),
             "generation":          "Génération",
             "git_commit":          st.column_config.TextColumn("Commit Git"),
             "device":              "Device",
@@ -846,38 +878,31 @@ def show_monitoring_tab() -> None:
 
 
 def show_search_tab() -> None:
-    """Onglet Recherche : retrouver des predictions par nom d'image ou par patient
+    """Onglet Recherche : retrouver des predictions par nom d'image ou par nom de patient
     (patient simule — un lot d'images analyse = un patient, cf. show_classification_tab)."""
     st.subheader("Recherche de predictions")
     st.caption(
         "Patients simules : chaque lot analyse dans l'onglet Classification "
-        "est associe a un nouveau numero de patient."
+        "est associe a un nom de patient (saisi, ou generique si laisse vide)."
     )
 
-    col_name, col_patient, col_search = st.columns([3, 1, 1])
+    col_name, col_patient, col_search = st.columns([3, 2, 1])
     with col_name:
         image_name = st.text_input("Nom d'image (recherche partielle)", value="")
     with col_patient:
-        patient_id_input = st.text_input("N° patient", value="")
+        patient_name_input = st.text_input("Nom du patient (recherche partielle)", value="")
     with col_search:
         st.write("")
         search_btn = st.button("Rechercher", type="primary", use_container_width=True)
 
     if not search_btn and "search_results" not in st.session_state:
-        st.info("Renseigne un nom d'image et/ou un numero de patient, puis clique sur Rechercher.")
+        st.info("Renseigne un nom d'image et/ou un nom de patient, puis clique sur Rechercher.")
         return
 
     if search_btn:
-        patient_id = None
-        if patient_id_input.strip():
-            try:
-                patient_id = int(patient_id_input.strip())
-            except ValueError:
-                st.error("Le numero de patient doit etre un entier.")
-                return
         try:
             st.session_state["search_results"] = search_predictions(
-                image_name=image_name.strip(), patient_id=patient_id,
+                image_name=image_name.strip(), patient_name=patient_name_input.strip(),
             )
         except Exception as e:
             st.error(f"Recherche impossible : {e}")
@@ -891,11 +916,13 @@ def show_search_tab() -> None:
     st.caption(f"{len(df)} resultat(s) (200 max)")
     df_display = df.rename(columns={
         "id": "ID",
-        "patient_id": "Patient",
+        "patient_id": "ID patient",
+        "patient_name": "Patient",
         "image_name": "Image",
         "predicted_class": "Classe predite",
         "confidence": "Confiance",
         "model_version": "Version modele",
+        "triggered_by": "Analyse par",
         "created_at": "Date",
     })
     st.dataframe(
@@ -923,10 +950,68 @@ def _level_badge(level: str) -> str:
 
 def show_drift_tab() -> None:
     """Onglet Drift : rapports Evidently de data drift et model drift."""
-    st.subheader("Monitoring du drift (IVDR 2017/746)")
-    st.caption(
-        "Seuils d'alerte : warning > 0.10 | alerte > 0.20 | critique > 0.30"
-    )
+    # CSS global pour forcer les labels en noir
+    st.markdown("""
+    <style>
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stNumberInput"] label {
+        color: #0f172a !important;
+        font-weight: 600 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<h2 style="color:#0f172a;font-weight:700;">Monitoring du drift (IVDR 2017/746)</h2>', unsafe_allow_html=True)  # noqa: E501
+
+    st.markdown("""
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;
+                  background:white;border-radius:10px;overflow:hidden;
+                  box-shadow:0 1px 4px rgba(0,0,0,0.07);border:1px solid #e2e8f0;">
+      <thead>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Niveau</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Score</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Signification</th>
+          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Action IVDR</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span
+            style="background:#dcfce7;color:#14532d;border:1px solid #16a34a;
+            border-radius:6px;padding:3px 10px;font-weight:700;">✅ Normal</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">&lt; 0.10</td>
+          <td style="padding:10px 14px;color:#334155;">Aucun drift significatif</td>
+          <td style="padding:10px 14px;color:#334155;">Aucune action requise</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span
+            style="background:#fef9c3;color:#713f12;border:1px solid #ca8a04;
+            border-radius:6px;padding:3px 10px;font-weight:700;">⚠️ Warning</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.10 – 0.20</td>
+          <td style="padding:10px 14px;color:#334155;">Drift léger détecté</td>
+          <td style="padding:10px 14px;color:#334155;">Surveillance renforcée</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:10px 14px;"><span
+            style="background:#ffedd5;color:#7c2d12;border:1px solid #ea580c;
+            border-radius:6px;padding:3px 10px;font-weight:700;">🟠 Alerte</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.20 – 0.30</td>
+          <td style="padding:10px 14px;color:#334155;">Drift modéré</td>
+          <td style="padding:10px 14px;color:#334155;">Analyse + envisager ré-entraînement (MDCG 2020-1)</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;"><span
+            style="background:#fee2e2;color:#7f1d1d;border:1px solid #dc2626;
+            border-radius:6px;padding:3px 10px;font-weight:700;">🔴 Critique</span></td>
+          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">≥ 0.30</td>
+          <td style="padding:10px 14px;color:#334155;">Drift sévère</td>
+          <td style="padding:10px 14px;color:#334155;">Investigation immédiate obligatoire (ISO 14971 §9)</td>
+        </tr>
+      </tbody>
+    </table>
+    """, unsafe_allow_html=True)
 
     col_gen, col_ver = st.columns([2, 1])
     with col_ver:
@@ -967,106 +1052,22 @@ def show_drift_tab() -> None:
 
     st.divider()
 
-    # ── Metriques cles ────────────────────────────────────────────────────────
-    st.subheader("Resume")
-    metrics = result.get("metrics", {})
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Reference", f"{result.get('n_reference', 0)} imgs")
-    c2.metric("Production", f"{result.get('n_current', 0)} predictions")
-    c3.metric("Features driftees", result.get("n_drifted_features", 0))
-
-    data_level = result.get("data_drift_level", "unknown")
-    pred_level = result.get("pred_drift_level", "unknown")
-    c4.metric(
-        "Data drift",
-        f"{result.get('data_drift_score', 0):.3f}",
-        delta=_DRIFT_LEVELS[data_level][0],
-        delta_color="off",
-    )
-    c5.metric(
-        "Prediction drift",
-        f"{result.get('pred_drift_score', 0):.3f}",
-        delta=_DRIFT_LEVELS[pred_level][0],
-        delta_color="off",
-    )
-    confidence_drift = metrics.get("prediction_drift", {}).get("confidence_drift")
-    c6.metric(
-        "Drift de confidence",
-        f"{confidence_drift:.3f}" if confidence_drift is not None else "N/A",
-    )
-
-    # Detail du data drift par feature
-    per_feature = metrics.get("data_drift", {}).get("per_feature", {})
-    if per_feature:
-        with st.expander("Detail du data drift par feature"):
-            df_feat = pd.DataFrame([
-                {
-                    "Feature": feat,
-                    "Drift detecte": "Oui" if vals.get("drift_detected") else "Non",
-                    "Score": vals.get("drift_score", 0.0),
-                    "Test statistique": vals.get("stattest", ""),
-                }
-                for feat, vals in per_feature.items()
-            ]).sort_values("Score", ascending=False)
-            st.dataframe(df_feat, use_container_width=True, hide_index=True)
-
-    # Model drift (feedback medecin)
-    model_score = result.get("model_drift_score")
-    model_metrics = metrics.get("model_drift", {})
-    if model_score is not None:
-        st.divider()
-        st.subheader("Model drift (feedback medecin)")
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Feedbacks recus", model_metrics.get("n_feedback", 0))
-        mc2.metric("Taux accord medecin", f"{model_metrics.get('accuracy', 0)*100:.1f}%")
-        mc3.metric(
-            "Taux desaccord",
-            f"{model_metrics.get('disagree_rate', 0)*100:.1f}%",
-            delta="Alerte si > 10%",
-            delta_color="off",
-        )
-    else:
-        st.info("Model drift : aucun feedback medecin enregistre pour l'instant.")
-
-    # ── Alertes actives ───────────────────────────────────────────────────────
-    alerts = []
-    if result.get("data_drift_score", 0) >= 0.30:
-        alerts.append("CRITIQUE — Data drift score > 0.30 : investigation obligatoire.")
-    elif result.get("data_drift_score", 0) >= 0.20:
-        alerts.append("ALERTE — Data drift score > 0.20 : surveillance renforcee.")
-    elif result.get("data_drift_score", 0) >= 0.10:
-        alerts.append("WARNING — Data drift score > 0.10 : surveiller l'evolution.")
-
-    if result.get("pred_drift_score", 0) >= 0.20:
-        alerts.append("ALERTE — Distribution des classes predites a derive.")
-
-    if model_score is not None and model_score >= 0.15:
-        alerts.append("ALERTE — Taux de desaccord medecin > 15%.")
-    elif model_score is not None and model_score >= 0.10:
-        alerts.append("WARNING — Taux de desaccord medecin > 10%.")
-
-    if alerts:
-        st.divider()
-        for alert in alerts:
-            if alert.startswith("CRITIQUE"):
-                st.error(alert)
-            elif alert.startswith("ALERTE"):
-                st.warning(alert)
-            else:
-                st.info(alert)
-
-    # ── Rapport Evidently complet ─────────────────────────────────────────────
-    if result.get("report_html"):
-        st.divider()
-        st.subheader("Rapport Evidently complet")
-        if result.get("created_at"):
-            st.caption(f"Genere le : {result['created_at']} | Version modele : {result.get('model_version', 'toutes')}")
-        st.components.v1.html(result["report_html"], height=900, scrolling=True)
+    # ── Rapport showcase ──────────────────────────────────────────────────────
+    try:
+        from src.evidently.generate_showcase_report import build_showcase_html
+        showcase_html = build_showcase_html(result)
+        st.components.v1.html(showcase_html, height=1200, scrolling=True)
+    except Exception as e:
+        st.error(f"Erreur lors de la generation du rapport showcase : {e}")
 
     # ── Performance du modele (MLflow + Supabase class_metrics) ──────────────
     st.divider()
-    st.subheader("Performance du modele (MLflow)")
-    st.caption("Evolution de macro_F1 et accuracy par generation — seuil d'alerte IVDR : baisse > 5%")
+    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Performance du modele (MLflow)</h3>', unsafe_allow_html=True)  # noqa: E501
+    st.markdown(  # noqa: E501
+        '<p style="color:#334155;font-size:14px;">Evolution de macro_F1 et accuracy par generation'
+        " — seuil d'alerte IVDR : baisse &gt; 5%</p>",
+        unsafe_allow_html=True,
+    )
 
     load_perf = st.button("Charger les metriques de performance", key="load_perf")
     if load_perf or st.session_state.get("perf_data"):
@@ -1201,7 +1202,11 @@ def show_drift_tab() -> None:
                             "f1": "F1",
                             "support": "Support",
                         })
-                        st.caption(f"Generation {last_gen}")
+                        st.markdown(  # noqa: E501
+                            f'<p style="color:#334155;font-size:13px;">Génération : '
+                            f'<strong style="color:#0f172a;">{last_gen}</strong></p>',
+                            unsafe_allow_html=True,
+                        )
                         st.dataframe(
                             df_last.style.format({"Precision": "{:.4f}", "Recall": "{:.4f}", "F1": "{:.4f}"}),
                             use_container_width=True,
@@ -1209,7 +1214,7 @@ def show_drift_tab() -> None:
 
     # ── Matrice de confusion ──────────────────────────────────────────────────
     st.divider()
-    st.subheader("Matrice de confusion")
+    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Matrice de confusion</h3>', unsafe_allow_html=True)
     try:
         from src.evidently.drift_report import list_confusion_generations, load_confusion_matrix
         generations = list_confusion_generations()
@@ -1221,7 +1226,7 @@ def show_drift_tab() -> None:
         st.info("Aucune matrice de confusion disponible.")
     else:
         selected_gen = st.selectbox(
-            "Generation", generations, index=0, key="cm_generation",
+            "Génération", generations, index=0, key="cm_generation",
         )
         cm_data = load_confusion_matrix(selected_gen)
         if cm_data is None:

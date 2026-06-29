@@ -261,10 +261,11 @@ def generate_report(model_version: str | None = None) -> dict:
         RETURNING id
         """,
         (
-            model_version, len(ref_feat), len(cur_feat),
-            data_drift_detected, data_drift_share,
-            pred_drift_detected, pred_drift_score,
-            model_drift_score, n_drifted,
+            model_version, int(len(ref_feat)), int(len(cur_feat)),
+            bool(data_drift_detected), float(data_drift_share),
+            bool(pred_drift_detected), float(pred_drift_score),
+            float(model_drift_score) if model_drift_score is not None else None,
+            int(n_drifted),
             json.dumps(metrics), report_html,
         ),
     )
@@ -275,14 +276,14 @@ def generate_report(model_version: str | None = None) -> dict:
 
     return {
         "report_id":           report_id,
-        "data_drift_detected": data_drift_detected,
-        "data_drift_score":    data_drift_share,
+        "data_drift_detected": bool(data_drift_detected),
+        "data_drift_score":    float(data_drift_share),
         "data_drift_level":    _drift_level(data_drift_share),
-        "pred_drift_detected": pred_drift_detected,
-        "pred_drift_score":    pred_drift_score,
+        "pred_drift_detected": bool(pred_drift_detected),
+        "pred_drift_score":    float(pred_drift_score),
         "pred_drift_level":    _drift_level(pred_drift_score),
-        "model_drift_score":   model_drift_score,
-        "n_drifted_features":  n_drifted,
+        "model_drift_score":   float(model_drift_score) if model_drift_score is not None else None,
+        "n_drifted_features":  int(n_drifted),
         "n_reference":         len(ref_feat),
         "n_current":           len(cur_feat),
         "metrics":             metrics,
