@@ -4,6 +4,9 @@
 !/data/runs/
 /data/runs/run*/*
 !/data/runs/*.dvc
+!/data/lotstiff/
+/data/lotstiff/batch*/*
+!/data/lotstiff/*.dvc
 CellImagesSource1/
 CellImagesSource/
 src/independent_scripts/outputs/
