@@ -956,7 +956,7 @@ def show_drift_tab() -> None:
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<h2 style="color:#0f172a;font-weight:700;">Monitoring du drift (IVDR 2017/746)</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 style="color:#0f172a;font-weight:700;">Monitoring du drift (IVDR 2017/746)</h2>', unsafe_allow_html=True)  # noqa: E501
 
     st.markdown("""
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;
@@ -972,25 +972,33 @@ def show_drift_tab() -> None:
       </thead>
       <tbody>
         <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span style="background:#dcfce7;color:#14532d;border:1px solid #16a34a;border-radius:6px;padding:3px 10px;font-weight:700;">✅ Normal</span></td>
+          <td style="padding:10px 14px;"><span
+            style="background:#dcfce7;color:#14532d;border:1px solid #16a34a;
+            border-radius:6px;padding:3px 10px;font-weight:700;">✅ Normal</span></td>
           <td style="padding:10px 14px;color:#0f172a;font-weight:700;">&lt; 0.10</td>
           <td style="padding:10px 14px;color:#334155;">Aucun drift significatif</td>
           <td style="padding:10px 14px;color:#334155;">Aucune action requise</td>
         </tr>
         <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span style="background:#fef9c3;color:#713f12;border:1px solid #ca8a04;border-radius:6px;padding:3px 10px;font-weight:700;">⚠️ Warning</span></td>
+          <td style="padding:10px 14px;"><span
+            style="background:#fef9c3;color:#713f12;border:1px solid #ca8a04;
+            border-radius:6px;padding:3px 10px;font-weight:700;">⚠️ Warning</span></td>
           <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.10 – 0.20</td>
           <td style="padding:10px 14px;color:#334155;">Drift léger détecté</td>
           <td style="padding:10px 14px;color:#334155;">Surveillance renforcée</td>
         </tr>
         <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span style="background:#ffedd5;color:#7c2d12;border:1px solid #ea580c;border-radius:6px;padding:3px 10px;font-weight:700;">🟠 Alerte</span></td>
+          <td style="padding:10px 14px;"><span
+            style="background:#ffedd5;color:#7c2d12;border:1px solid #ea580c;
+            border-radius:6px;padding:3px 10px;font-weight:700;">🟠 Alerte</span></td>
           <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.20 – 0.30</td>
           <td style="padding:10px 14px;color:#334155;">Drift modéré</td>
           <td style="padding:10px 14px;color:#334155;">Analyse + envisager ré-entraînement (MDCG 2020-1)</td>
         </tr>
         <tr>
-          <td style="padding:10px 14px;"><span style="background:#fee2e2;color:#7f1d1d;border:1px solid #dc2626;border-radius:6px;padding:3px 10px;font-weight:700;">🔴 Critique</span></td>
+          <td style="padding:10px 14px;"><span
+            style="background:#fee2e2;color:#7f1d1d;border:1px solid #dc2626;
+            border-radius:6px;padding:3px 10px;font-weight:700;">🔴 Critique</span></td>
           <td style="padding:10px 14px;color:#0f172a;font-weight:700;">≥ 0.30</td>
           <td style="padding:10px 14px;color:#334155;">Drift sévère</td>
           <td style="padding:10px 14px;color:#334155;">Investigation immédiate obligatoire (ISO 14971 §9)</td>
@@ -1048,8 +1056,12 @@ def show_drift_tab() -> None:
 
     # ── Performance du modele (MLflow + Supabase class_metrics) ──────────────
     st.divider()
-    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Performance du modele (MLflow)</h3>', unsafe_allow_html=True)
-    st.markdown('<p style="color:#334155;font-size:14px;">Evolution de macro_F1 et accuracy par generation — seuil d\'alerte IVDR : baisse &gt; 5%</p>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color:#0f172a;font-weight:700;">Performance du modele (MLflow)</h3>', unsafe_allow_html=True)  # noqa: E501
+    st.markdown(  # noqa: E501
+        '<p style="color:#334155;font-size:14px;">Evolution de macro_F1 et accuracy par generation'
+        " — seuil d'alerte IVDR : baisse &gt; 5%</p>",
+        unsafe_allow_html=True,
+    )
 
     load_perf = st.button("Charger les metriques de performance", key="load_perf")
     if load_perf or st.session_state.get("perf_data"):
@@ -1184,7 +1196,11 @@ def show_drift_tab() -> None:
                             "f1": "F1",
                             "support": "Support",
                         })
-                        st.markdown(f'<p style="color:#334155;font-size:13px;">Génération : <strong style="color:#0f172a;">{last_gen}</strong></p>', unsafe_allow_html=True)
+                        st.markdown(  # noqa: E501
+                            f'<p style="color:#334155;font-size:13px;">Génération : '
+                            f'<strong style="color:#0f172a;">{last_gen}</strong></p>',
+                            unsafe_allow_html=True,
+                        )
                         st.dataframe(
                             df_last.style.format({"Precision": "{:.4f}", "Recall": "{:.4f}", "F1": "{:.4f}"}),
                             use_container_width=True,

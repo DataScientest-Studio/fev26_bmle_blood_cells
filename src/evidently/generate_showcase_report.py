@@ -53,10 +53,10 @@ def _score_to_level(score: float) -> str:
 
 def _score_bar(score: float) -> str:
     pct = min(100, round(score * 100))
-    l = _lvl(_score_to_level(score))
+    lv = _lvl(_score_to_level(score))
     return (
         '<div style="background:#e2e8f0;border-radius:999px;height:10px;width:100%;margin-top:6px;">'
-        f'<div style="background:{l["border"]};width:{pct}%;height:10px;border-radius:999px;"></div>'
+        f'<div style="background:{lv["border"]};width:{pct}%;height:10px;border-radius:999px;"></div>'
         "</div>"
     )
 
@@ -87,21 +87,21 @@ def _card(content: str) -> str:
 
 
 def _level_badge(level: str, score: float | None = None) -> str:
-    l = _lvl(level)
+    lv = _lvl(level)
     score_str = f" — {score:.4f}" if score is not None else ""
     return (
-        f'<span style="background:{l["bg"]};color:{l["text"]};border:1px solid {l["border"]};'
+        f'<span style="background:{lv["bg"]};color:{lv["text"]};border:1px solid {lv["border"]};'
         f'border-radius:6px;padding:3px 10px;font-size:13px;font-weight:600;">'
-        f'{l["icon"]} {l["label"]}{score_str}</span>'
+        f'{lv["icon"]} {lv["label"]}{score_str}</span>'
     )
 
 
 def _alert_box(level: str, content: str) -> str:
-    l = _lvl(level)
+    lv = _lvl(level)
     return (
-        f'<div style="background:{l["bg"]};border-left:5px solid {l["border"]};'
+        f'<div style="background:{lv["bg"]};border-left:5px solid {lv["border"]};'
         f'border-radius:8px;padding:16px 20px;margin-bottom:20px;">'
-        f'<div style="color:{l["text"]}">{content}</div></div>'
+        f'<div style="color:{lv["text"]}">{content}</div></div>'
     )
 
 
@@ -185,23 +185,25 @@ def _section_data_drift(metrics: dict) -> str:
     score = dd.get("share", 0.0)
     n_drifted = dd.get("n_drifted_features", 0)
     per_feature = dd.get("per_feature", {})
-    l = _lvl(level)
+    lv = _lvl(level)
 
     summary_content = (
         f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
-        f'<span style="font-size:28px;">{l["icon"]}</span>'
+        f'<span style="font-size:28px;">{lv["icon"]}</span>'
         f'<div>'
-        f'<div style="font-size:24px;font-weight:800;color:{l["text"]};">'
+        f'<div style="font-size:24px;font-weight:800;color:{lv["text"]};">'
         f'{score:.1%} des features en drift ({n_drifted}/{len(per_feature)})</div>'
-        f'<div style="font-size:13px;color:{l["text"]};margin-top:2px;opacity:0.85;">'
-        f'Niveau : <strong>{l["label"].upper()}</strong></div>'
+        f'<div style="font-size:13px;color:{lv["text"]};margin-top:2px;opacity:0.85;">'
+        f'Niveau : <strong>{lv["label"].upper()}</strong></div>'
         f'</div></div>'
     )
 
+    _th = 'style="padding:10px 14px;text-align:left;color:#475569;font-weight:600;border-bottom:2px solid #e2e8f0;"'  # noqa: E501
     rows = ""
     for feat, v in per_feature.items():
         fl = _lvl(_score_to_level(v["drift_score"]))
-        status = f'<span style="color:{fl["text"]};font-weight:600;">{fl["icon"]} {"Drift" if v["drift_detected"] else "Stable"}</span>'
+        detected_label = "Drift" if v["drift_detected"] else "Stable"
+        status = f'<span style="color:{fl["text"]};font-weight:600;">{fl["icon"]} {detected_label}</span>'
         rows += (
             f'<tr style="border-bottom:1px solid #f1f5f9;">'
             f'<td style="padding:10px 14px;font-weight:600;color:#0f172a;">{feat}</td>'
@@ -216,10 +218,10 @@ def _section_data_drift(metrics: dict) -> str:
     table = (
         '<table style="width:100%;border-collapse:collapse;font-size:14px;">'
         '<thead><tr style="background:#f8fafc;">'
-        '<th style="padding:10px 14px;text-align:left;color:#475569;font-weight:600;border-bottom:2px solid #e2e8f0;">Feature</th>'
-        '<th style="padding:10px 14px;text-align:left;color:#475569;font-weight:600;border-bottom:2px solid #e2e8f0;">Test statistique</th>'
-        '<th style="padding:10px 14px;text-align:left;color:#475569;font-weight:600;border-bottom:2px solid #e2e8f0;">Score</th>'
-        '<th style="padding:10px 14px;text-align:left;color:#475569;font-weight:600;border-bottom:2px solid #e2e8f0;">Statut</th>'
+        f'<th {_th}>Feature</th>'
+        f'<th {_th}>Test statistique</th>'
+        f'<th {_th}>Score</th>'
+        f'<th {_th}>Statut</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>'
     )
 
@@ -251,16 +253,16 @@ def _section_pred_drift(metrics: dict) -> str:
     level = pd_.get("level", "unknown")
     score = pd_.get("score", 0.0)
     detected = pd_.get("detected", False)
-    l = _lvl(level)
+    lv = _lvl(level)
     status = "détecté" if detected else "non détecté"
 
     content = (
         f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
-        f'<span style="font-size:28px;">{l["icon"]}</span>'
+        f'<span style="font-size:28px;">{lv["icon"]}</span>'
         f'<div style="flex:1;min-width:200px;">'
-        f'<div style="font-size:24px;font-weight:800;color:{l["text"]};">Score : {score:.4f}</div>'
-        f'<div style="font-size:13px;color:{l["text"]};margin-top:2px;opacity:0.85;">'
-        f'Niveau : <strong>{l["label"].upper()}</strong> — Drift {status}</div>'
+        f'<div style="font-size:24px;font-weight:800;color:{lv["text"]};">Score : {score:.4f}</div>'
+        f'<div style="font-size:13px;color:{lv["text"]};margin-top:2px;opacity:0.85;">'
+        f'Niveau : <strong>{lv["label"].upper()}</strong> — Drift {status}</div>'
         f'{_score_bar(score)}'
         f'</div></div>'
     )
@@ -290,15 +292,15 @@ def _section_pred_drift(metrics: dict) -> str:
 def _section_confidence_drift(metrics: dict) -> str:
     score = metrics.get("prediction_drift", {}).get("confidence_drift", 0.0)
     level = _score_to_level(score)
-    l = _lvl(level)
+    lv = _lvl(level)
 
     content = (
         f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
-        f'<span style="font-size:28px;">{l["icon"]}</span>'
+        f'<span style="font-size:28px;">{lv["icon"]}</span>'
         f'<div style="flex:1;min-width:200px;">'
-        f'<div style="font-size:24px;font-weight:800;color:{l["text"]};">Score : {score:.4f}</div>'
-        f'<div style="font-size:13px;color:{l["text"]};margin-top:2px;opacity:0.85;">'
-        f'Niveau : <strong>{l["label"].upper()}</strong></div>'
+        f'<div style="font-size:24px;font-weight:800;color:{lv["text"]};">Score : {score:.4f}</div>'
+        f'<div style="font-size:13px;color:{lv["text"]};margin-top:2px;opacity:0.85;">'
+        f'Niveau : <strong>{lv["label"].upper()}</strong></div>'
         f'{_score_bar(score)}'
         f'</div></div>'
     )
@@ -327,8 +329,10 @@ def _section_confidence_drift(metrics: dict) -> str:
 
 def _section_model_drift(metrics: dict) -> str:
     md = metrics.get("model_drift", {})
-    header = _section_num(4, "Désaccord Médecin",
-                           "Feedback clinicien — seule métrique avec ground truth réel")
+    header = _section_num(
+        4, "Désaccord Médecin",
+        "Feedback clinicien — seule métrique avec ground truth réel",
+    )
     if not md:
         return _card(
             header
@@ -341,24 +345,23 @@ def _section_model_drift(metrics: dict) -> str:
     accuracy = md.get("accuracy", 0.0)
     disagree = md.get("disagree_rate", 0.0)
     level = _score_to_level(disagree)
-    l = _lvl(level)
+    lv = _lvl(level)
 
+    _card_style = "border-radius:12px;padding:20px;text-align:center;"
     cards_html = (
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">'
-
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;">'
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;{_card_style}">'
         f'<div style="font-size:36px;font-weight:800;color:#0f172a;">{n}</div>'
         '<div style="font-size:13px;color:#475569;margin-top:6px;font-weight:500;">Feedbacks enregistrés</div>'
         '</div>'
-
-        '<div style="background:#dcfce7;border:1px solid #16a34a;border-radius:12px;padding:20px;text-align:center;">'
+        f'<div style="background:#dcfce7;border:1px solid #16a34a;{_card_style}">'
         f'<div style="font-size:36px;font-weight:800;color:#14532d;">{accuracy:.0%}</div>'
         '<div style="font-size:13px;color:#14532d;margin-top:6px;font-weight:500;">Taux d\'accord médecin</div>'
         '</div>'
-
-        f'<div style="background:{l["bg"]};border:1px solid {l["border"]};border-radius:12px;padding:20px;text-align:center;">'
-        f'<div style="font-size:36px;font-weight:800;color:{l["text"]};">{disagree:.0%}</div>'
-        f'<div style="font-size:13px;color:{l["text"]};margin-top:6px;font-weight:500;">Taux de désaccord {l["icon"]}</div>'
+        f'<div style="background:{lv["bg"]};border:1px solid {lv["border"]};{_card_style}">'
+        f'<div style="font-size:36px;font-weight:800;color:{lv["text"]};">{disagree:.0%}</div>'
+        f'<div style="font-size:13px;color:{lv["text"]};margin-top:6px;font-weight:500;">'
+        f'Taux de désaccord {lv["icon"]}</div>'
         '</div>'
         '</div>'
     )
