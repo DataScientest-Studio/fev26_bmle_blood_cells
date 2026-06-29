@@ -404,6 +404,65 @@ def load_performance_metrics() -> dict:
     }
 
 
+def list_confusion_generations() -> list[str]:
+    """Liste les generations disponibles pour les matrices de confusion, la plus recente en premier."""
+    conn = _get_conn()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT generation, MAX(created_at) as last_seen
+            FROM confusion_matrices
+            WHERE generation IS NOT NULL
+            GROUP BY generation
+            ORDER BY last_seen DESC
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
+    return df["generation"].tolist()
+
+
+def load_confusion_matrix(generation: str | None = None) -> dict | None:
+    """Charge la matrice de confusion d'une generation (la plus recente si non precisee)."""
+    conn = _get_conn()
+    try:
+        if generation:
+            df = pd.read_sql(
+                """
+                SELECT generation, class_order, matrix, created_at
+                FROM confusion_matrices
+                WHERE generation = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                conn,
+                params=(generation,),
+            )
+        else:
+            df = pd.read_sql(
+                """
+                SELECT generation, class_order, matrix, created_at
+                FROM confusion_matrices
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                conn,
+            )
+    finally:
+        conn.close()
+
+    if df.empty:
+        return None
+    row = df.iloc[0]
+    class_order = row["class_order"] if isinstance(row["class_order"], list) else json.loads(row["class_order"])
+    matrix = row["matrix"] if isinstance(row["matrix"], list) else json.loads(row["matrix"])
+    return {
+        "generation":  row["generation"],
+        "class_order": class_order,
+        "matrix":      matrix,
+        "created_at":  str(row["created_at"]),
+    }
+
+
 def load_last_report() -> dict | None:
     """Charge le dernier rapport depuis Supabase."""
     conn = _get_conn()
