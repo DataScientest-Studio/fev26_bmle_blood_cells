@@ -22,6 +22,8 @@ COPY configs/      ./configs/
 COPY scripts/      ./scripts/
 # Config DVC remote (URL uniquement, sans credentials — injectés à l'exécution)
 COPY .dvc/config   ./.dvc/config
+# Pointeur DVC du modèle (nécessaire pour dvc pull models.dvc au démarrage)
+COPY models.dvc    ./models.dvc
 
 # Créer les répertoires de travail
 RUN mkdir -p mlruns data models logs
