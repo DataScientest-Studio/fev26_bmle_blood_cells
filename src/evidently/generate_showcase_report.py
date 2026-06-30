@@ -342,26 +342,38 @@ def _section_model_drift(metrics: dict) -> str:
         )
 
     n = md.get("n_feedback", 0)
+    n_total = md.get("n_total_predictions", 0)
+    coverage = md.get("coverage_rate", 0.0)
     accuracy = md.get("accuracy", 0.0)
     disagree = md.get("disagree_rate", 0.0)
     level = _score_to_level(disagree)
     lv = _lvl(level)
 
+    coverage_html = (
+        f'<div style="background:#f1f5f9;border-radius:8px;padding:10px 16px;'
+        f'margin-bottom:16px;font-size:13px;color:#475569;">'
+        f'Taux de couverture : <strong style="color:#0f172a;">{coverage:.0%}</strong> '
+        f'— feedback reçu sur <strong>{n}</strong> des <strong>{n_total}</strong> images analysées'
+        f'</div>'
+    )
+
     _card_style = "border-radius:12px;padding:20px;text-align:center;"
     cards_html = (
-        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">'
+        coverage_html
+        + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">'
         f'<div style="background:#f8fafc;border:1px solid #e2e8f0;{_card_style}">'
         f'<div style="font-size:36px;font-weight:800;color:#0f172a;">{n}</div>'
         '<div style="font-size:13px;color:#475569;margin-top:6px;font-weight:500;">Feedbacks enregistrés</div>'
         '</div>'
         f'<div style="background:#dcfce7;border:1px solid #16a34a;{_card_style}">'
         f'<div style="font-size:36px;font-weight:800;color:#14532d;">{accuracy:.0%}</div>'
-        '<div style="font-size:13px;color:#14532d;margin-top:6px;font-weight:500;">Taux d\'accord médecin</div>'
+        '<div style="font-size:13px;color:#14532d;margin-top:6px;font-weight:500;">'
+        'Taux d\'accord (images reviewées)</div>'
         '</div>'
         f'<div style="background:{lv["bg"]};border:1px solid {lv["border"]};{_card_style}">'
         f'<div style="font-size:36px;font-weight:800;color:{lv["text"]};">{disagree:.0%}</div>'
         f'<div style="font-size:13px;color:{lv["text"]};margin-top:6px;font-weight:500;">'
-        f'Taux de désaccord {lv["icon"]}</div>'
+        f'Taux de désaccord (images reviewées) {lv["icon"]}</div>'
         '</div>'
         '</div>'
     )
@@ -369,7 +381,8 @@ def _section_model_drift(metrics: dict) -> str:
     note = (
         '<div style="background:#fef9c3;border-left:5px solid #ca8a04;border-radius:8px;'
         'padding:14px 18px;font-size:13px;color:#713f12;">'
-        f'⚠️ <strong>Note :</strong> Avec {n} feedbacks, ce score est indicatif uniquement. '
+        f'⚠️ <strong>Note :</strong> Ces taux portent uniquement sur les {n} images ayant reçu '
+        f'un feedback ({coverage:.0%} des prédictions). '
         'La significativité statistique est atteinte à partir de ~50 feedbacks (IVDR MDCG 2020-1).'
         '</div>'
     )

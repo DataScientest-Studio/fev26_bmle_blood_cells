@@ -35,6 +35,8 @@ Le projet repose sur une stack conteneurisée (Docker) avec plusieurs services i
 | **Airflow** | Orchestration des pipelines ML (entraînement, fine-tuning) | 8080 |
 | **Supabase / PostgreSQL** | Stockage des prédictions et logs | — |
 
+> Diagramme complet (Mermaid) : [Data_architecture/architecture.md](Data_architecture/architecture.md)
+
 ---
 
 ## Structure du projet
@@ -91,9 +93,10 @@ Le projet repose sur une stack conteneurisée (Docker) avec plusieurs services i
 │   │   └── predict_model.py
 │   ├── data/                   # Chargement et transformation des données
 │   ├── features/               # Extraction de features morphologiques
-│   ├── mlflow/                 # Intégration MLflow
-│   └── visualization/          # Visualisations (GradCAM++, métriques)
+│   └── mlflow/                 # Intégration MLflow
 ├── tests/                      # Tests unitaires (dataset, transforms, predict)
+├── Data_architecture/
+│   └── architecture.md         # Diagramme Mermaid de l'architecture complète
 ├── Makefile                    # Commandes raccourcies
 └── requirements/               # Dépendances Python
     ├── base.txt
@@ -160,15 +163,14 @@ uvicorn src.serving.api:app --host 0.0.0.0 --port 8000 --reload
 
 ## Application Streamlit
 
-L'interface propose 5 onglets :
+L'interface propose 4 onglets :
 
 | Onglet | Fonctionnalité |
 |---|---|
-| **Classification** | Analyse image unique ou par lot (simulation patient), GradCAM++, feedback |
-| **Logs** | Historique des entraînements MLflow |
-| **Monitoring** | Rapports de monitoring du modèle |
+| **Classification** | Analyse image unique ou par lot (simulation patient), GradCAM++, feedback médecin |
 | **Recherche** | Retrouver des prédictions par nom d'image ou par patient |
-| **Drift** | Rapports de drift Evidently (conformité IVDR 2017/746) |
+| **Logs** | Historique des entraînements (Supabase + métriques MLflow) |
+| **Monitoring** | Rapports de drift Evidently, matrice de confusion, performance par génération (IVDR 2017/746) |
 
 ---
 

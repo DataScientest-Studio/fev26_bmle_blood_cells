@@ -188,13 +188,18 @@ def generate_report(model_version: str | None = None) -> dict:
     feedback = _load_feedback()
     model_drift_score = None
     model_metrics = {}
+    n_total_predictions = len(cur)
     if not feedback.empty:
         accuracy = feedback["agrees"].mean()
         disagree_rate = 1 - accuracy
+        n_fb = len(feedback)
+        coverage_rate = round(n_fb / n_total_predictions, 4) if n_total_predictions > 0 else 0.0
         model_metrics = {
-            "n_feedback":    len(feedback),
-            "accuracy":      round(float(accuracy), 4),
-            "disagree_rate": round(float(disagree_rate), 4),
+            "n_feedback":          n_fb,
+            "n_total_predictions": n_total_predictions,
+            "coverage_rate":       coverage_rate,
+            "accuracy":            round(float(accuracy), 4),
+            "disagree_rate":       round(float(disagree_rate), 4),
         }
         model_drift_score = round(float(disagree_rate), 4)
 

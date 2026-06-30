@@ -7,6 +7,7 @@ app.py — Streamlit : Analyse de frottis sanguin (DenseNet-121)
 import base64
 import io
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -87,6 +88,40 @@ header[data-testid="stHeader"] { display: none !important; }
 /* ── Global ── */
 .stApp { background-color: #F0F4F8; }
 .block-container { padding-top: 0.8rem; padding-bottom: 2rem; }
+
+/* ── Texte noir sur fond clair (contenu principal) ── */
+[data-testid="stMain"] p,
+[data-testid="stMain"] h1,
+[data-testid="stMain"] h2,
+[data-testid="stMain"] h3,
+[data-testid="stMain"] h4,
+[data-testid="stMain"] h5,
+[data-testid="stMain"] h6,
+[data-testid="stMain"] li,
+[data-testid="stMain"] td,
+[data-testid="stMain"] th,
+[data-testid="stMain"] label,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"],
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] *,
+[data-testid="stMain"] [data-testid="stMetricValue"],
+[data-testid="stMain"] [data-testid="stMetricLabel"],
+[data-testid="stMain"] [data-testid="stMetricDelta"],
+[data-testid="stMain"] [data-testid="stCaptionContainer"],
+[data-testid="stMain"] [data-testid="stCaptionContainer"] *,
+[data-testid="stMain"] [data-testid="stText"],
+[data-testid="stMain"] .stMarkdown,
+[data-testid="stMain"] .stMarkdown *,
+[data-testid="stMain"] .stCaption,
+[data-testid="stMain"] .stCaption *,
+[data-testid="stMain"] [class*="caption"],
+[data-testid="stMain"] [class*="Caption"] {
+    color: #0F172A !important;
+}
+/* Préserver les couleurs des boutons, badges, et texte blanc sur fond coloré */
+[data-testid="stMain"] .stButton > button[kind="primary"],
+[data-testid="stMain"] .stButton > button[kind="primary"] * {
+    color: white !important;
+}
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
@@ -177,8 +212,80 @@ header[data-testid="stHeader"] { display: none !important; }
     box-shadow: 0 1px 4px rgba(0,0,0,0.05);
     border: 1px solid #E2E8F0;
 }
+
+/* ── Expanders — header blanc sur fond sombre ── */
+[data-testid="stExpander"] details {
+    border-radius: 10px !important;
+    border: 1px solid #E2E8F0 !important;
+    margin-bottom: 8px !important;
+    overflow: hidden !important;
+}
+[data-testid="stExpander"] details summary {
+    background: #1A2B4A !important;
+    padding: 12px 16px !important;
+}
+/* Cibler le <p> spécifiquement — surcharge le sélecteur global stMain p */
+[data-testid="stExpander"] details summary [data-testid="stMarkdownContainer"] p,
+[data-testid="stExpander"] details summary [data-testid="stMarkdownContainer"],
+[data-testid="stExpander"] details summary [data-testid="stMarkdownContainer"] * {
+    color: #FFFFFF !important;
+    font-weight: 700 !important;
+}
+[data-testid="stExpander"] details summary span,
+[data-testid="stExpander"] details summary svg {
+    color: #FFFFFF !important;
+    fill: #FFFFFF !important;
+}
+/* Contenu de l'expander — fond blanc, texte noir */
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+    background: white !important;
+}
 </style>
     """, unsafe_allow_html=True)
+
+
+# ── Helpers DagsHub / DVC ─────────────────────────────────────────────────────
+
+LOTSTIFF_DIR = ROOT / "data" / "lotstiff"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"}
+
+
+def _list_batches() -> list[str]:
+    """Batches disponibles (fichiers .dvc dans data/lotstiff/), triés numériquement."""
+    return sorted(
+        [p.stem for p in LOTSTIFF_DIR.glob("batch*.dvc")],
+        key=lambda b: int(b[len("batch"):]),
+    )
+
+
+def _pull_batch(batch_name: str) -> tuple[bool, str]:
+    """DVC pull d'un batch. Retourne (succès, message)."""
+    dagshub_user = os.getenv("DAGSHUB_USER", "")
+    dagshub_token = os.getenv("DAGSHUB_TOKEN", "")
+    dvc_file = LOTSTIFF_DIR / f"{batch_name}.dvc"
+    for cmd in [
+        ["dvc", "remote", "modify", "dagshub", "--local", "auth", "basic"],
+        ["dvc", "remote", "modify", "dagshub", "--local", "user", dagshub_user],
+        ["dvc", "remote", "modify", "dagshub", "--local", "password", dagshub_token],
+    ]:
+        subprocess.run(cmd, capture_output=True, cwd=ROOT)
+    result = subprocess.run(
+        ["dvc", "pull", str(dvc_file)],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    if result.returncode != 0:
+        return False, result.stderr or result.stdout
+    return True, f"{batch_name} synchronisé."
+
+
+def _list_batch_images(batch_name: str) -> list[Path]:
+    """Liste toutes les images d'un batch (avec sous-dossiers par classe)."""
+    batch_dir = LOTSTIFF_DIR / batch_name
+    if not batch_dir.is_dir():
+        return []
+    return sorted(
+        [p for p in batch_dir.rglob("*") if p.suffix.lower() in IMAGE_EXTS]
+    )
 
 
 # ── Helpers image ─────────────────────────────────────────────────────────────
@@ -613,29 +720,81 @@ def show_classification_tab() -> None:
         placeholder="Ex : GLPG_123456_20250907 — laissé vide, un nom générique sera attribué",
     )
 
-    col_up, col_btn = st.columns([5, 1])
-    with col_up:
-        uploaded_files = st.file_uploader(
-            "Images du frottis",
-            type=["jpg", "jpeg", "png", "tiff", "bmp"],
-            accept_multiple_files=True,
-            label_visibility="collapsed",
-            help="Sélectionnez les images de cellules sanguines du patient",
-        )
-    with col_btn:
-        analyse_btn = st.button(
+    source = st.radio(
+        "Source des images", ["📁 Upload local", "☁️ DagsHub"],
+        horizontal=True, label_visibility="collapsed",
+    )
+
+    # ── Source : Upload local ──────────────────────────────────────────────────
+    if source == "📁 Upload local":
+        col_up, col_btn = st.columns([5, 1])
+        with col_up:
+            uploaded_files = st.file_uploader(
+                "Images du frottis",
+                type=["jpg", "jpeg", "png", "tiff", "bmp"],
+                accept_multiple_files=True,
+                label_visibility="collapsed",
+                help="Sélectionnez les images de cellules sanguines du patient",
+            )
+        with col_btn:
+            analyse_btn = st.button(
+                "Analyser", type="primary", use_container_width=True,
+                disabled=not uploaded_files,
+            )
+
+        if not uploaded_files:
+            st.info("Chargez les images de cellules du patient pour lancer l'analyse.")
+            return
+
+        files_to_analyze = uploaded_files
+        st.caption(f"{len(files_to_analyze)} image(s) chargée(s)")
+
+    # ── Source : DagsHub ──────────────────────────────────────────────────────
+    else:
+        import random as _random
+        batches = _list_batches()
+        if not batches:
+            st.error("Aucun batch .dvc trouvé dans data/lotstiff/")
+            return
+
+        col_b, col_n = st.columns([3, 2])
+        selected_batch = col_b.selectbox("Batch", batches)
+        n_images = col_n.slider("Nombre d'images", 1, 50, 10)
+
+        col_load, col_analyse = st.columns([2, 1])
+        load_btn = col_load.button("☁️ Charger depuis DagsHub", use_container_width=True)
+
+        if load_btn:
+            st.session_state.pop("dh_images", None)
+            with st.spinner(f"DVC pull {selected_batch}…"):
+                ok, msg = _pull_batch(selected_batch)
+            if not ok:
+                st.error(f"DVC pull échoué : {msg}")
+                return
+            all_imgs = _list_batch_images(selected_batch)
+            picked = _random.sample(all_imgs, min(n_images, len(all_imgs)))
+            st.session_state["dh_images"] = picked
+            st.session_state["dh_batch"] = selected_batch
+            st.success(f"{len(picked)} images chargées depuis {selected_batch}")
+
+        dh_images: list[Path] = st.session_state.get("dh_images", [])
+        if not dh_images:
+            st.info("Sélectionne un batch et clique sur Charger.")
+            return
+
+        batch_dir = LOTSTIFF_DIR / st.session_state.get("dh_batch", selected_batch)
+        all_names = [str(p.relative_to(batch_dir)) for p in dh_images]
+        selected_names = st.multiselect("Images sélectionnées", all_names, default=all_names)
+        files_to_analyze = [batch_dir / n for n in selected_names]
+
+        analyse_btn = col_analyse.button(
             "Analyser", type="primary", use_container_width=True,
-            disabled=not uploaded_files,
+            disabled=not files_to_analyze,
         )
+        if not files_to_analyze:
+            return
 
-    if not uploaded_files:
-        st.info("Chargez les images de cellules du patient pour lancer l'analyse.")
-        return
-
-    n_files = len(uploaded_files)
-    st.caption(f"{n_files} image(s) chargée(s)")
-
-    # ── Lancer l'analyse ──
+    # ── Lancer l'analyse (commun upload + DagsHub) ────────────────────────────
     if analyse_btn:
         st.session_state.pop("batch_results", None)
         st.session_state.pop("selected_idx", None)
@@ -648,17 +807,19 @@ def show_classification_tab() -> None:
         triggered_by = st.session_state.get("username")
 
         results = []
+        n_files = len(files_to_analyze)
         progress = st.progress(0, text="Initialisation…")
         status = st.empty()
 
-        for i, f in enumerate(uploaded_files[:n_files]):
-            status.caption(f"Analyse de {f.name}  ({i + 1}/{n_files})")
+        for i, f in enumerate(files_to_analyze):
+            fname = f.name if hasattr(f, "read") else Path(f).name
+            status.caption(f"Analyse de {fname}  ({i + 1}/{n_files})")
             img = Image.open(f).convert("RGB")
             res = gradcam_predict(
-                img, f.name, patient_id=patient_id, patient_name=patient_name,
+                img, fname, patient_id=patient_id, patient_name=patient_name,
                 triggered_by=triggered_by,
             )
-            res["filename"] = f.name
+            res["filename"] = fname
             res["patient_id"] = patient_id
             res["patient_name"] = patient_name
             res["original_img_b64"] = _pil_to_b64(img.resize((224, 224)))
@@ -1260,6 +1421,425 @@ def show_drift_tab() -> None:
             st.plotly_chart(fig_cm, use_container_width=True)
 
 
+def show_context_tab() -> None:
+    st.markdown(
+        '<h2 style="color:#1E293B;font-weight:700;margin-bottom:4px;">📖 Contexte du projet</h2>'
+        '<p style="color:#64748B;font-size:0.9rem;margin-bottom:24px;">'
+        'Blood Cell Analyzer — DenseNet-121 · 8 classes · GradCAM++</p>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 0. Introduction ───────────────────────────────────────────────────────
+    with st.expander("🏥 Introduction — CHU Lyon (HCL)", expanded=True):
+        col_ctx, col_obj = st.columns(2)
+        with col_ctx:
+            st.markdown(
+                '<div style="background:white;border-radius:12px;padding:20px 22px;'
+                'border:1px solid #E2E8F0;margin-bottom:12px;">'
+                '<p style="color:#2563EB;font-weight:700;font-size:1rem;margin:0 0 12px;">'
+                'Contexte</p>'
+                '<ul style="color:#334155;font-size:0.88rem;line-height:1.8;'
+                'margin:0;padding-left:18px;">'
+                '<li>Le CHU réalise un <strong>volume important d\'analyses sanguines</strong></li>'
+                '<li>La lecture de frottis est critique mais '
+                '<strong>aujourd\'hui manuelle</strong></li>'
+                '<li>Processus actuel : <strong>long, coûteux</strong> et variable selon '
+                'les observateurs = besoin de standardisation</li>'
+                '</ul>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            _img_path = ROOT / "src" / "serving" / "assets" / "blood_test.png"
+            if _img_path.exists():
+                _, _ic, _ = st.columns([0.2, 0.6, 0.2])
+                with _ic:
+                    st.image(str(_img_path), use_container_width=True)
+        with col_obj:
+            st.markdown(
+                '<div style="background:white;border-radius:12px;padding:20px 22px;'
+                'border:1px solid #E2E8F0;height:100%;">'
+                '<p style="color:#2563EB;font-weight:700;font-size:1rem;margin:0 0 12px;">'
+                'Objectifs métier</p>'
+                '<ul style="color:#334155;font-size:0.88rem;line-height:1.8;'
+                'margin:0 0 16px;padding-left:18px;">'
+                '<li>Accélérer l\'analyse des frottis sanguins du CHU</li>'
+                '<li>Identifier &amp; classer les cellules sanguines</li>'
+                '<li><strong>Aide au diagnostic</strong> via les prédictions du modèle</li>'
+                '</ul>'
+                '<div style="background:#EFF6FF;border-radius:8px;padding:14px 16px;'
+                'border:1px solid #BFDBFE;">'
+                '<p style="color:#2563EB;font-weight:700;font-size:0.88rem;margin:0 0 8px;">'
+                'Users</p>'
+                '<ul style="color:#1E40AF;font-size:0.85rem;line-height:1.7;'
+                'margin:0;padding-left:16px;">'
+                '<li>Biologiste</li><li>Hématologue</li><li>Chercheur</li>'
+                '</ul>'
+                '</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── 1. Les 8 classes ──────────────────────────────────────────────────────
+    with st.expander("🩸 Les 8 classes de cellules sanguines", expanded=True):
+        CLASS_INFO = {
+            "Basophil": (
+                "BAS",
+                "Globule blanc rare, impliqué dans les réactions allergiques et inflammatoires.",
+            ),
+            "Eosinophil": (
+                "EOS",
+                "Globule blanc actif dans les réponses immunitaires contre les parasites et les allergies.",
+            ),
+            "Erythroblast": (
+                "ERY",
+                "Précurseur des globules rouges. Sa présence dans le sang circulant est anormale"
+                " et peut indiquer une anémie sévère ou une leucémie.",
+            ),
+            "IG": (
+                "IG",
+                "Immature Granulocyte — granulocyte immature. Marqueur d'infection sévère"
+                " ou de pathologie myéloïde.",
+            ),
+            "Lymphocyte": (
+                "LYM",
+                "Cellule centrale de l'immunité adaptative (lymphocytes B et T).",
+            ),
+            "Monocyte": (
+                "MON",
+                "Grand globule blanc, précurseur des macrophages. Rôle clé dans la phagocytose.",
+            ),
+            "Neutrophil": (
+                "NEU",
+                "Globule blanc le plus abondant, première ligne de défense contre les bactéries.",
+            ),
+            "Platelet": (
+                "PLT",
+                "Thrombocyte — fragment cellulaire essentiel à la coagulation sanguine.",
+            ),
+        }
+        cols = st.columns(2)
+        for i, (cls, (abbr, desc)) in enumerate(CLASS_INFO.items()):
+            color = CLASS_COLORS[cls]
+            is_crit = cls in CRITICAL
+            with cols[i % 2]:
+                st.markdown(
+                    f'<div style="background:white;border-radius:10px;padding:12px 16px;'
+                    f'margin-bottom:10px;border:1px solid #E2E8F0;'
+                    f'border-left:4px solid {color};">'
+                    f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+                    f'<span style="background:{color};color:white;padding:2px 8px;'
+                    f'border-radius:4px;font-size:0.75rem;font-weight:700;">{abbr}</span>'
+                    f'<span style="font-weight:700;color:#1E293B;">{cls}</span>'
+                    + (
+                        '<span style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;'
+                        'border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;'
+                        'margin-left:auto;">⚠ Critique</span>' if is_crit else ""
+                    )
+                    + f'</div>'
+                    f'<p style="color:#475569;font-size:0.82rem;margin:0;line-height:1.5;">{desc}</p>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── 2. Modèle DenseNet-121 ────────────────────────────────────────────────
+    with st.expander("🧠 Modèle — DenseNet-121", expanded=True):
+        col_txt, col_arch = st.columns([3, 2])
+        with col_txt:
+            st.markdown("""
+<div style="color:#1E293B;">
+
+**DenseNet-121** (Densely Connected Convolutional Network, 2017) est un réseau de neurones
+convolutif profond composé de **121 couches**.
+
+Son principe fondamental : chaque couche reçoit en entrée les **feature maps de toutes les
+couches précédentes** (connexions denses). Cela permet :
+- de réutiliser les caractéristiques apprises à chaque niveau
+- de lutter contre le vanishing gradient
+- d'être **plus compact** qu'un ResNet pour des performances équivalentes
+
+**Dans ce projet**, le modèle est pré-entraîné sur ImageNet puis **fine-tuné** sur des images
+de cellules sanguines (224×224 px). La dernière couche fully-connected est remplacée par un
+classifieur à 8 sorties (softmax).
+
+**GradCAM++** génère la carte de chaleur en calculant le gradient du score de la classe prédite
+par rapport aux activations de la dernière couche convolutive — ce qui indique visuellement
+quelles zones de l'image ont influencé la décision.
+</div>
+""", unsafe_allow_html=True)
+        with col_arch:
+            st.markdown(
+                '<div style="background:#F8FAFC;border-radius:10px;padding:16px;'
+                'border:1px solid #E2E8F0;font-size:0.82rem;color:#334155;line-height:1.8;">'
+                '<div style="font-weight:700;color:#1E293B;margin-bottom:10px;">Architecture simplifiée</div>'
+                '<div style="font-family:monospace;">'
+                '📥 Input (224×224×3)<br>'
+                '│<br>'
+                '├─ Conv 7×7, stride 2<br>'
+                '│<br>'
+                '├─ Dense Block 1  (6 layers)<br>'
+                '├─ Transition Layer<br>'
+                '│<br>'
+                '├─ Dense Block 2  (12 layers)<br>'
+                '├─ Transition Layer<br>'
+                '│<br>'
+                '├─ Dense Block 3  (24 layers)<br>'
+                '├─ Transition Layer<br>'
+                '│<br>'
+                '├─ Dense Block 4  (16 layers)<br>'
+                '│<br>'
+                '├─ Global Avg Pool<br>'
+                '│<br>'
+                '📤 FC → Softmax (8 classes)'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        prod = fetch_production_version()
+        if prod:
+            st.markdown(
+                f'<div style="background:#EFF6FF;border-radius:8px;padding:10px 16px;'
+                f'margin-top:12px;border:1px solid #BFDBFE;font-size:0.85rem;color:#1E40AF;">'
+                f'🚀 <strong>Version en production</strong> : MLflow v{prod["version"]} '
+                f'· Génération {prod["generation"]}'
+                + (f' · macro_F1 = <strong>{prod["macro_f1"]:.4f}</strong>' if prod["macro_f1"] else "")
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── 3. Architecture technique ─────────────────────────────────────────────
+    with st.expander("⚙️ Architecture technique — MLOps", expanded=False):
+        st.graphviz_chart("""
+digraph mlops {
+    rankdir=LR
+    graph [fontname="Helvetica" splines=ortho nodesep=0.4 ranksep=0.7]
+    node  [fontname="Helvetica" fontsize=11 style="rounded,filled" margin="0.18,0.1"]
+    edge  [fontname="Helvetica" fontsize=9]
+
+    /* ── 1. DATA ── */
+    subgraph cluster_data {
+        label="① Data" style=filled color="#EFF6FF"
+        fontcolor="#1E40AF" fontsize=11 fontname="Helvetica Bold"
+        DVC  [label="DVC\\nVersionning" fillcolor="#C7D2FE" color="#4F46E5" fontcolor="#1E1B4B"]
+        DAG  [label="DagsHub\\nStorage"  fillcolor="#C7D2FE" color="#4F46E5" fontcolor="#1E1B4B"]
+        DVC -> DAG [label="push/pull" dir=both]
+    }
+
+    /* ── 2. TRAIN ── */
+    subgraph cluster_train {
+        label="② Train" style=filled color="#F0FDF4"
+        fontcolor="#14532D" fontsize=11 fontname="Helvetica Bold"
+        PT   [label="PyTorch\\nDenseNet-121" fillcolor="#BBF7D0" color="#15803D" fontcolor="#14532D"]
+        EXP  [label="MLflow\\nExperiment Tracking" fillcolor="#BBF7D0" color="#15803D" fontcolor="#14532D"]
+        PT -> EXP [label="params / métriques\\n/ artefacts"]
+    }
+
+    /* ── 3. REGISTRY ── */
+    subgraph cluster_registry {
+        label="③ Model Registry" style=filled color="#FEF9C3"
+        fontcolor="#713F12" fontsize=11 fontname="Helvetica Bold"
+        REG  [label="MLflow Registry\\nStaging → Production" fillcolor="#FEF08A" color="#CA8A04" fontcolor="#713F12"]
+    }
+
+    /* ── 4. SERVE ── */
+    subgraph cluster_serve {
+        label="④ Serve" style=filled color="#FFF1F2"
+        fontcolor="#881337" fontsize=11 fontname="Helvetica Bold"
+        API  [label="FastAPI\\nInference + GradCAM" fillcolor="#FECDD3" color="#E11D48" fontcolor="#881337"]
+        DOCK [label="Docker\\nContainer" fillcolor="#FECDD3" color="#E11D48" fontcolor="#881337"]
+        API -> DOCK [label="image"]
+    }
+
+    /* ── 5. MONITOR ── */
+    subgraph cluster_monitor {
+        label="⑤ Monitor" style=filled color="#F5F3FF"
+        fontcolor="#4C1D95" fontsize=11 fontname="Helvetica Bold"
+        EVI  [label="Evidently\\nData Drift" fillcolor="#DDD6FE" color="#7C3AED" fontcolor="#4C1D95"]
+        SUP  [label="Supabase\\nPrédictions + Feedback" fillcolor="#DDD6FE" color="#7C3AED" fontcolor="#4C1D95"]
+        EVI -> SUP [label="rapport"]
+    }
+
+    /* ── 6. UI ── */
+    subgraph cluster_ui {
+        label="⑥ UI" style=filled color="#FFF7ED"
+        fontcolor="#7C2D12" fontsize=11 fontname="Helvetica Bold"
+        STR  [label="Streamlit\\nDashboard" fillcolor="#FED7AA" color="#EA580C" fontcolor="#7C2D12"]
+    }
+
+    /* ── FLUX PRINCIPAL ── */
+    DAG  -> PT   [label="images train" color="#4F46E5" fontcolor="#4F46E5"]
+    EXP  -> REG  [label="enregistrement modèle" color="#15803D" fontcolor="#15803D"]
+    REG  -> API  [label="modèle @production" color="#CA8A04" fontcolor="#CA8A04" style=bold penwidth=2]
+    DAG  -> API  [label="images batch" color="#4F46E5" fontcolor="#4F46E5"]
+    API  -> SUP  [label="logs prédictions" color="#E11D48" fontcolor="#E11D48"]
+    SUP  -> EVI  [label="données courantes" color="#7C3AED" fontcolor="#7C3AED"]
+    SUP  -> STR  [label="historique" color="#7C3AED" fontcolor="#7C3AED"]
+    API  -> STR  [label="prédiction + GradCAM" color="#E11D48" fontcolor="#E11D48"]
+    EVI  -> STR  [label="rapport drift" color="#7C3AED" fontcolor="#7C3AED"]
+
+    /* ── FEEDBACK LOOP ── */
+    STR  -> SUP  [label="feedback médecin" style=dashed color="#EA580C" fontcolor="#EA580C"]
+    SUP  -> PT   [label="données corrigées\\n(ré-entraînement)"
+                  style=dashed color="#EA580C" fontcolor="#EA580C" constraint=false]
+}
+""", use_container_width=True)
+
+        # Légende avec les vraies couleurs de marque
+        STACK = [
+            ("DVC",        "#7B61FF", "white"),
+            ("DagsHub",    "#4F46E5", "white"),
+            ("PyTorch",    "#EE4C2C", "white"),
+            ("MLflow",     "#0194E2", "white"),
+            ("FastAPI",    "#009688", "white"),
+            ("Docker",     "#2496ED", "white"),
+            ("Evidently",  "#7C3AED", "white"),
+            ("Supabase",   "#3ECF8E", "#1a1a1a"),
+            ("Streamlit",  "#FF4B4B", "white"),
+        ]
+        st.markdown(
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'
+            + "".join(
+                f'<span style="background:{bg};color:{fg};border-radius:6px;'
+                f'padding:3px 11px;font-size:0.78rem;font-weight:700;">{name}</span>'
+                for name, bg, fg in STACK
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── 4. Utilisateurs ───────────────────────────────────────────────────────
+    with st.expander("👥 Utilisateurs cibles", expanded=False):
+        _assets = ROOT / "src" / "serving" / "assets"
+        PERSONAS = [
+            {
+                "name": "Dr Katharina Weill",
+                "photo": str(_assets / "Dr Katharina Weil.png"),
+                "color": "#3B82F6",
+                "age": "34 ans",
+                "role": "Biologiste médical",
+                "context": "Laboratoire hospitalier",
+                "description": (
+                    "Biologiste orientée sécurité et qualité. Veut "
+                    "<strong>réduire le temps de lecture tout en garantissant "
+                    "une détection robuste</strong> des anomalies, avec traçabilité "
+                    "et <strong>intégration au flux de validation.</strong>"
+                ),
+            },
+            {
+                "name": "Dr Camille Morel",
+                "photo": str(_assets / "Dr. Camille Morel.png"),
+                "color": "#10B981",
+                "age": "42 ans",
+                "role": "Hématologue",
+                "context": "Service clinique, urgences, hospitalisation, RCP",
+                "description": (
+                    "Clinicienne expérimentée, habituée aux situations critiques. "
+                    "<strong>Recherche des outils qui accélèrent et fiabilisent "
+                    "le diagnostic,</strong> sans complexifier, avec preuves "
+                    "et robustesse en contexte hospitalier."
+                ),
+            },
+            {
+                "name": "Dr Étienne Nagel",
+                "photo": str(_assets / "Dr Étienne Nagel.png"),
+                "color": "#8B5CF6",
+                "age": "33 ans",
+                "role": "Post-doctorant en hématologie",
+                "context": "Exploitation scientifique des données",
+                "description": (
+                    "Post-doctorant plein d'ambition, son rôle est "
+                    "<strong>l'exploitation scientifique des données</strong> "
+                    "des cellules pour la recherche (identifier des corrélations "
+                    "entre morphologie et anomalies moléculaires…)."
+                ),
+            },
+        ]
+
+        cols = st.columns(3)
+        for col, p in zip(cols, PERSONAS):
+            with col:
+                photo_path = Path(p["photo"])
+                if photo_path.exists():
+                    img_b64 = base64.b64encode(photo_path.read_bytes()).decode()
+                    img_src = f"data:image/png;base64,{img_b64}"
+                else:
+                    img_src = ""
+                st.markdown(
+                    f'<div style="background:white;border-radius:14px;padding:20px;'
+                    f'border:1px solid #E2E8F0;'
+                    f'box-shadow:0 2px 8px rgba(0,0,0,0.05);height:100%;">'
+                    f'<p style="font-style:italic;font-weight:700;font-size:1.05rem;'
+                    f'color:#1E293B;text-align:center;margin:0 0 14px;">{p["name"]}</p>'
+                    f'<div style="text-align:center;margin-bottom:14px;">'
+                    + (
+                        f'<img src="{img_src}" '
+                        f'style="width:96px;height:96px;border-radius:50%;object-fit:cover;'
+                        f'border:3px solid {p["color"]};display:inline-block;"/>'
+                        if img_src else
+                        f'<div style="width:96px;height:96px;border-radius:50%;'
+                        f'background:{p["color"]};display:inline-flex;align-items:center;'
+                        f'justify-content:center;font-size:1.5rem;font-weight:800;'
+                        f'color:white;">{p["name"][:2]}</div>'
+                    )
+                    + f'</div>'
+                    f'<div style="font-size:0.85rem;color:#475569;line-height:1.75;'
+                    f'margin-bottom:16px;">'
+                    f'<strong style="color:#1E293B;">{p["age"]}</strong><br>'
+                    f'{p["role"]}<br>'
+                    f'<span style="color:#94A3B8;">Contexte : {p["context"]}</span>'
+                    f'</div>'
+                    f'<div style="background:{p["color"]};color:white;text-align:center;'
+                    f'border-radius:6px;padding:5px 10px;font-size:0.75rem;font-weight:700;'
+                    f'letter-spacing:0.08em;margin-bottom:12px;">DESCRIPTION</div>'
+                    f'<p style="font-size:0.85rem;color:#334155;line-height:1.65;margin:0;">'
+                    f'{p["description"]}</p>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── 5. Réglementation & Sécurité ─────────────────────────────────────────
+    with st.expander("🛡️ Réglementation & Sécurité", expanded=False):
+        col_reg, col_sec = st.columns(2)
+        with col_reg:
+            st.markdown(
+                '<div style="background:white;border-radius:10px;padding:16px;'
+                'border:1px solid #E2E8F0;height:100%;">'
+                '<div style="font-weight:700;color:#1E293B;margin-bottom:10px;">📋 Cadre réglementaire</div>'
+                '<p style="color:#475569;font-size:0.85rem;line-height:1.7;margin:0;">'
+                'Ce système est conçu en référence au règlement européen '
+                '<strong>IVDR 2017/746</strong> sur les dispositifs médicaux de diagnostic in vitro.<br><br>'
+                'Les principaux principes appliqués :'
+                '</p>'
+                '<ul style="color:#475569;font-size:0.85rem;line-height:1.9;margin:8px 0 0;padding-left:18px;">'
+                '<li>Surveillance post-marché via le monitoring de drift (onglet Monitoring)</li>'
+                '<li>Seuil d\'alerte de dégradation des performances : <strong>−5% macro_F1</strong></li>'
+                '<li>Traçabilité complète des prédictions (Supabase) et des entraînements (MLflow)</li>'
+                '<li>Validation humaine obligatoire pour les classes critiques (ERY, IG)</li>'
+                '</ul>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        with col_sec:
+            st.markdown(
+                '<div style="background:white;border-radius:10px;padding:16px;'
+                'border:1px solid #E2E8F0;height:100%;">'
+                '<div style="font-weight:700;color:#1E293B;margin-bottom:10px;">🔒 Sécurité</div>'
+                '<ul style="color:#475569;font-size:0.85rem;line-height:1.9;margin:0;padding-left:18px;">'
+                '<li><strong>Authentification</strong>'
+                ' — accès restreint par identifiants (Supabase Auth)</li>'
+                '<li><strong>API sécurisée</strong>'
+                ' — clé secrète requise sur chaque appel (<code>X-API-Key</code>)</li>'
+                '<li><strong>Traçabilité</strong>'
+                " — chaque prédiction enregistre l'utilisateur déclencheur</li>"
+                '<li><strong>Feedback médecin</strong>'
+                ' — correction humaine tracée pour audit et ré-entraînement</li>'
+                '<li><strong>Isolation des services</strong>'
+                ' — architecture Docker réseau interne, API non exposée publiquement</li>'
+                '</ul>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Blood Cell Analyzer",
@@ -1273,6 +1853,7 @@ def main() -> None:
         return
 
     PAGES = {
+        "Contexte":       ("📖", show_context_tab),
         "Classification": ("🔬", show_classification_tab),
         "Recherche":      ("🔍", show_search_tab),
         "Logs":           ("📋", show_logs_tab),
@@ -1280,7 +1861,7 @@ def main() -> None:
     }
 
     if "page" not in st.session_state:
-        st.session_state["page"] = "Classification"
+        st.session_state["page"] = "Contexte"
 
     with st.sidebar:
         st.markdown("""
@@ -1301,6 +1882,7 @@ def main() -> None:
         )
 
         NAV_OPTIONS = {
+            "📖  Contexte":       "Contexte",
             "🔬  Classification": "Classification",
             "🔍  Recherche":      "Recherche",
             "📋  Logs":           "Logs",
