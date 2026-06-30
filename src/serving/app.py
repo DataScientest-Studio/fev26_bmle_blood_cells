@@ -813,7 +813,7 @@ def show_logs_tab() -> None:
         filtered = filtered[filtered["status"] == status_filter]
 
     col_order = [
-        "mlflow_run_id", "model_name", "generation", "git_commit",
+        "mlflow_run_id", "model_name", "generation", "mlflow_version", "git_commit",
         "device", "status", "started_at", "duration_seconds",
         "cpu_percent_avg", "ram_used_mb_avg", "gpu_name",
         "gpu_util_percent_avg", "gpu_mem_used_mb_avg", "macro_f1", "accuracy",
@@ -1049,6 +1049,14 @@ def show_drift_tab() -> None:
     if result is None:
         st.info("Aucun rapport disponible. Clique sur 'Generer le rapport de drift'.")
         return
+
+    st.divider()
+
+    # ── Compteurs images ──────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Images de référence", f"{result.get('n_reference', 0):,}")
+    c2.metric("Images en production (courantes)", f"{result.get('n_current', 0):,}")
+    c3.metric("Rapport généré le", str(result.get("created_at", "—"))[:16])
 
     st.divider()
 
