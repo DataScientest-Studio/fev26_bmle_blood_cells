@@ -9,5 +9,7 @@ RUN pip install --no-cache-dir \
     apache-airflow-providers-ssh \
     mlflow==3.11.1 \
     dvc==3.67.1 \
-    timm
+    timm \
+    evidently==0.7.21 \
+    scikit-learn
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
