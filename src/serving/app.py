@@ -1056,7 +1056,11 @@ def show_drift_tab() -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Images de référence", f"{result.get('n_reference', 0):,}")
     c2.metric("Images en production (courantes)", f"{result.get('n_current', 0):,}")
-    c3.metric("Rapport généré le", str(result.get("created_at", "—"))[:16])
+    generated_at = (
+        result.get("created_at")
+        or result.get("metrics", {}).get("generated_at", "—")
+    )
+    c3.metric("Rapport généré le", str(generated_at)[:16])
 
     st.divider()
 
