@@ -20,9 +20,15 @@ RUN pip install --upgrade pip && pip install -r requirements/api.txt
 COPY src/          ./src/
 COPY configs/      ./configs/
 COPY scripts/      ./scripts/
+# Config DVC remote (URL uniquement, sans credentials — injectés à l'exécution)
+COPY .dvc/config   ./.dvc/config
 
 # Créer les répertoires de travail
 RUN mkdir -p mlruns data models logs
+
+# Script de démarrage : dvc pull models.dvc puis uvicorn
+COPY docker/api/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && pip install --no-cache-dir dvc==3.67.1
 
 # Port FastAPI
 EXPOSE 8000
@@ -31,4 +37,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
 
-CMD ["uvicorn", "src.serving.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+ENTRYPOINT ["/entrypoint.sh"]
