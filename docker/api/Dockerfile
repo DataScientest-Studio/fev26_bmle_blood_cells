@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Dépendances système — libgl1 requis par cv2 (pytorch_grad_cam), même avec opencv-python-headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 libgl1 \
+    libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 libgl1 git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier requirements
@@ -22,9 +22,14 @@ COPY configs/      ./configs/
 COPY scripts/      ./scripts/
 # Config DVC remote (URL uniquement, sans credentials — injectés à l'exécution)
 COPY .dvc/config   ./.dvc/config
+# Pointeur DVC du modèle (nécessaire pour dvc pull models.dvc au démarrage)
+COPY models.dvc    ./models.dvc
 
 # Créer les répertoires de travail
-RUN mkdir -p mlruns data models logs
+RUN mkdir -p mlruns data models logs \
+    && git init \
+    && git config user.email "api@bloodcells.local" \
+    && git config user.name "API"
 
 # Script de démarrage : dvc pull models.dvc puis uvicorn
 COPY docker/api/entrypoint.sh /entrypoint.sh

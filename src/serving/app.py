@@ -1198,7 +1198,11 @@ def show_drift_tab() -> None:
                 with tabs_cls[-1]:
                     # Tableau toutes classes — derniere generation
                     if not df_classes.empty:
-                        last_gen = df_classes["generation"].max()
+                        valid_gens = df_classes["generation"].dropna()
+                        last_gen = max(
+                            valid_gens,
+                            key=lambda g: int(g[1:]) if isinstance(g, str) and g[1:].isdigit() else 0,
+                        ) if not valid_gens.empty else None
                         df_last = df_classes[df_classes["generation"] == last_gen][
                             ["class_name", "precision", "recall", "f1", "support"]
                         ].sort_values("f1", ascending=False)
