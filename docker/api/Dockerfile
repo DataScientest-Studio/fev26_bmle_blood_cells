@@ -26,7 +26,10 @@ COPY .dvc/config   ./.dvc/config
 COPY models.dvc    ./models.dvc
 
 # Créer les répertoires de travail
-RUN mkdir -p mlruns data models logs
+RUN mkdir -p mlruns data models logs \
+    && git init \
+    && git config user.email "api@bloodcells.local" \
+    && git config user.name "API"
 
 # Script de démarrage : dvc pull models.dvc puis uvicorn
 COPY docker/api/entrypoint.sh /entrypoint.sh
