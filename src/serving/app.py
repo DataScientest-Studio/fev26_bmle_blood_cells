@@ -54,7 +54,6 @@ CLASS_ABBR = {
     "Neutrophil": "NEU", "Platelet": "PLT",
 }
 
-BATCH_SIZES = [20, 50]
 GRID_COLS = 5
 
 
@@ -426,6 +425,7 @@ def login_screen() -> bool:
                 "Se connecter", use_container_width=True, type="primary"
             )
         if submitted:
+            username = username.strip()
             try:
                 ok = verify_user(username, password)
             except Exception:
@@ -613,18 +613,14 @@ def show_classification_tab() -> None:
         placeholder="Ex : GLPG_123456_20250907 — laissé vide, un nom générique sera attribué",
     )
 
-    col_up, col_sz, col_btn = st.columns([4, 1, 1])
+    col_up, col_btn = st.columns([5, 1])
     with col_up:
         uploaded_files = st.file_uploader(
             "Images du frottis",
             type=["jpg", "jpeg", "png", "tiff", "bmp"],
             accept_multiple_files=True,
             label_visibility="collapsed",
-            help="Sélectionnez 20 à 50 images de cellules sanguines",
-        )
-    with col_sz:
-        batch_limit = st.selectbox(
-            "Taille du lot", BATCH_SIZES, index=1, label_visibility="collapsed"
+            help="Sélectionnez les images de cellules sanguines du patient",
         )
     with col_btn:
         analyse_btn = st.button(
@@ -633,14 +629,11 @@ def show_classification_tab() -> None:
         )
 
     if not uploaded_files:
-        st.info("Chargez entre 20 et 50 images de cellules pour lancer l'analyse du frottis.")
+        st.info("Chargez les images de cellules du patient pour lancer l'analyse.")
         return
 
-    n_files = min(len(uploaded_files), batch_limit)
-    st.caption(
-        f"{len(uploaded_files)} image(s) chargée(s) — "
-        f"analyse du lot de {n_files} premières images"
-    )
+    n_files = len(uploaded_files)
+    st.caption(f"{n_files} image(s) chargée(s)")
 
     # ── Lancer l'analyse ──
     if analyse_btn:
@@ -735,6 +728,8 @@ def show_classification_tab() -> None:
                     _class_badge_html(res["predicted_class"], res["confidence"]),
                     unsafe_allow_html=True,
                 )
+                fname = res.get("filename", "")
+                st.caption(fname.rsplit(".", 1)[0] if fname else "")
                 if st.button(
                     "Détail",
                     key=f"sel_{abs_i}",
