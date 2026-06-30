@@ -20,6 +20,11 @@ x-airflow-common: &airflow-common
     SUPABASE_PASSWORD: ${SUPABASE_PASSWORD}
     MAC_TAILSCALE_IP: ${MAC_TAILSCALE_IP}
     WINDOWS_REPO_DIR: ${WINDOWS_REPO_DIR}
+    SMTP_HOST: ${SMTP_HOST}
+    SMTP_PORT: ${SMTP_PORT}
+    SMTP_USER: ${SMTP_USER}
+    SMTP_PASSWORD: ${SMTP_PASSWORD}
+    ALERT_EMAILS: ${ALERT_EMAILS}
     AIRFLOW_CONN_SSH_WINDOWS_GPU: >-
       {"conn_type": "ssh", "host": "${WINDOWS_TAILSCALE_IP}", "login": "${WINDOWS_SSH_USER}",
       "extra": {"key_file": "/opt/airflow/keys/airflow_to_windows", "no_host_key_check": true, "conn_timeout": 30}}
