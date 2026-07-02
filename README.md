@@ -196,13 +196,16 @@ Le monitoring post-marché repose sur **Evidently** et surveille 4 métriques cl
 
 | # | Métrique | Signal détecté | Test statistique |
 |---|---|---|---|
-| 1 | **Data drift — features image** | Changement de microscope, colorant, protocole d'acquisition | Wasserstein / Jensen-Shannon |
-| 2 | **Drift de distribution des classes** | Biais de sélection, changement épidémiologique, dérive comportement modèle | Jensen-Shannon divergence |
-| 3 | **Drift de confidence** | Dégradation silencieuse (signal précoce avant erreur de classe) | Wasserstein distance |
+| 1 | **Data drift — features image** | Changement de microscope, colorant, protocole d'acquisition | PSI (Population Stability Index) |
+| 2 | **Drift de distribution des classes** | Biais de sélection, changement épidémiologique, dérive comportement modèle | PSI (Population Stability Index) |
+| 3 | **Drift de confidence** | Dégradation silencieuse (signal précoce avant erreur de classe) | PSI (Population Stability Index) |
 | 4 | **Désaccord médecin** | Ground truth clinique réel — taux de désaccord sur feedbacks en base | Calcul direct |
 
+`stattest="psi"` est fixé explicitement sur toutes les métriques Evidently (data drift, prediction drift, confidence drift) pour que les scores soient comparables entre eux et aux mêmes seuils d'alerte — sans ce paramètre, Evidently choisit un test différent par colonne selon son type/sa taille, produisant des scores sur des échelles non comparables.
+
 **Features image surveillées (7)** : `mean_brightness`, `std_brightness`, `mean_r`, `mean_g`, `mean_b`, `image_width`, `image_height`  
-**Référence** : 2 400 images `Source_full`  
+**Référence** : `reference_features` (Supabase) — peuplée à l'initialisation (`init_db.py`) puis enrichie en continu à chaque promotion de batch (`_rotate_reference_with_batch` dans `airflow/dags/_common.py`). Les classes y sont stockées en minuscules (`basophil`, `ig`...) et normalisées à la comparaison avec `predictions.predicted_class` (capitalisé).  
+**Confidence de référence** : calculée par le modèle `@production` sur chaque image de référence (colonne `reference_features.confidence`), plutôt qu'une valeur fixe — repli automatique sur un proxy (`0.95`) tant que la colonne n'est pas encore suffisamment peuplée (`confidence_baseline: "proxy"` vs `"model"` dans les métriques du rapport).  
 **Classes critiques** : `Erythroblast`, `IG` (granulocyte immature)
 
 ### Seuils IVDR / ISO 14971

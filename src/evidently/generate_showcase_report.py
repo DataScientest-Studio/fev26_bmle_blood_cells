@@ -281,7 +281,7 @@ def _section_pred_drift(metrics: dict) -> str:
 
     return _card(
         _section_num(2, "Distribution des Classes Prédites",
-                     "Drift sur predicted_class — Jensen-Shannon divergence")
+                     "Drift sur predicted_class — PSI (Population Stability Index)")
         + definition
         + _alert_box(level, content)
     )
@@ -290,9 +290,17 @@ def _section_pred_drift(metrics: dict) -> str:
 # ── Section 3 : Confidence drift ─────────────────────────────────────────────
 
 def _section_confidence_drift(metrics: dict) -> str:
-    score = metrics.get("prediction_drift", {}).get("confidence_drift", 0.0)
+    pred_drift = metrics.get("prediction_drift", {})
+    score = pred_drift.get("confidence_drift", 0.0)
     level = _score_to_level(score)
     lv = _lvl(level)
+    baseline = pred_drift.get("confidence_baseline")
+    baseline_note = (
+        '<p style="font-size:12px;color:#b45309;margin:8px 0 0;">'
+        '⚠️ Baseline provisoire (valeur fixe 0.95) — les scores de confiance réels '
+        'sur le jeu de référence sont en cours de constitution.</p>'
+        if baseline == "proxy" else ""
+    )
 
     content = (
         f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
@@ -319,8 +327,9 @@ def _section_confidence_drift(metrics: dict) -> str:
 
     return _card(
         _section_num(3, "Drift de Confidence",
-                     "Distribution de la confidence du modèle — Wasserstein distance")
+                     "Distribution de la confidence du modèle — PSI (Population Stability Index)")
         + definition
+        + baseline_note
         + _alert_box(level, content)
     )
 

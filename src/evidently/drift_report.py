@@ -49,7 +49,7 @@ def _load_reference() -> pd.DataFrame:
     conn = _get_conn()
     df = pd.read_sql(
         "SELECT class_name, mean_brightness, std_brightness, mean_r, mean_g, mean_b,"
-        " image_width, image_height FROM reference_features",
+        " image_width, image_height, confidence FROM reference_features",
         conn,
     )
     conn.close()
@@ -146,9 +146,12 @@ def generate_report(model_version: str | None = None) -> dict:
     cur_feat = cur[available].dropna()
 
     # ── 1. Data drift ─────────────────────────────────────────────────────────
+    # stattest="psi" fixé explicitement pour que les scores soient comparables
+    # entre eux et aux seuils DRIFT_WARNING/ALERT/CRITICAL (sinon Evidently
+    # choisit un test différent par colonne, sur des échelles non comparables).
     data_report = Report(metrics=[
-        DatasetDriftMetric(),
-        *[ColumnDriftMetric(column_name=c) for c in available],
+        DatasetDriftMetric(stattest="psi"),
+        *[ColumnDriftMetric(column_name=c, stattest="psi") for c in available],
         DatasetSummaryMetric(),
     ])
     data_report.run(reference_data=ref_feat, current_data=cur_feat)
@@ -170,12 +173,31 @@ def generate_report(model_version: str | None = None) -> dict:
 
     # ── 2. Prediction drift ───────────────────────────────────────────────────
     pred_report = Report(metrics=[
-        ColumnDriftMetric(column_name="predicted_class"),
-        ColumnDriftMetric(column_name="confidence"),
+        ColumnDriftMetric(column_name="predicted_class", stattest="psi"),
+        ColumnDriftMetric(column_name="confidence", stattest="psi"),
     ])
     ref_pred = ref[["class_name"]].rename(columns={"class_name": "predicted_class"})
+    # Casse harmonisée : reference_features stocke les classes en minuscules,
+    # predictions les stocke capitalisées — sans normalisation le recouvrement
+    # entre les deux distributions est quasi nul et le drift score explose.
+    ref_pred["predicted_class"] = ref_pred["predicted_class"].str.lower()
     cur_pred = cur[["predicted_class", "confidence"]].dropna()
-    ref_pred["confidence"] = 0.95  # valeur proxy pour la référence
+    cur_pred["predicted_class"] = cur_pred["predicted_class"].str.lower()
+
+    # Baseline de confiance réelle (scores du modèle sur les images de référence,
+    # cf. init_db.py / _common.py::_rotate_reference_with_batch) plutôt qu'une
+    # constante — sinon n'importe quel test statistique devient instable.
+    # Repli sur le proxy fixe si aucune image de référence n'a encore de score
+    # (colonne ajoutée récemment, se peuple progressivement).
+    ref_confidence_pool = ref["confidence"].dropna()
+    if len(ref_confidence_pool) >= 30:
+        ref_pred["confidence"] = ref_confidence_pool.sample(
+            n=len(ref_pred), replace=True, random_state=42
+        ).values
+        confidence_baseline = "model"
+    else:
+        ref_pred["confidence"] = 0.95
+        confidence_baseline = "proxy"
 
     pred_report.run(reference_data=ref_pred, current_data=cur_pred)
     pred_result = pred_report.as_dict()
@@ -206,19 +228,19 @@ def generate_report(model_version: str | None = None) -> dict:
     # ── Rapport HTML combiné ──────────────────────────────────────────────────
     from evidently.legacy.report import Report as _Report
     html_report = _Report(metrics=[
-        DatasetDriftMetric(),
-        *[ColumnDriftMetric(column_name=c) for c in available],
-        ColumnDriftMetric(column_name="predicted_class"),
-        ColumnDriftMetric(column_name="confidence"),
+        DatasetDriftMetric(stattest="psi"),
+        *[ColumnDriftMetric(column_name=c, stattest="psi") for c in available],
+        ColumnDriftMetric(column_name="predicted_class", stattest="psi"),
+        ColumnDriftMetric(column_name="confidence", stattest="psi"),
         DatasetSummaryMetric(),
     ])
 
     ref_full = ref_feat.copy()
-    ref_full["predicted_class"] = ref["class_name"].values[:len(ref_feat)]
-    ref_full["confidence"] = 0.95
+    ref_full["predicted_class"] = ref["class_name"].str.lower().values[:len(ref_feat)]
+    ref_full["confidence"] = ref_pred["confidence"].values[:len(ref_full)]
 
     cur_full = cur_feat.copy()
-    cur_full["predicted_class"] = cur["predicted_class"].values[:len(cur_feat)]
+    cur_full["predicted_class"] = cur["predicted_class"].str.lower().values[:len(cur_feat)]
     cur_full["confidence"] = cur["confidence"].values[:len(cur_feat)]
 
     html_report.run(reference_data=ref_full, current_data=cur_full)
@@ -237,6 +259,7 @@ def generate_report(model_version: str | None = None) -> dict:
             "detected":        pred_drift_detected,
             "score":           pred_drift_score,
             "confidence_drift": conf_drift_score,
+            "confidence_baseline": confidence_baseline,
             "level":           _drift_level(pred_drift_score),
         },
         "model_drift": model_metrics,

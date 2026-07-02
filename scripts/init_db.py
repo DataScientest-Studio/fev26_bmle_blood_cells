@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS reference_features (
     image_height    INTEGER,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE reference_features ADD COLUMN IF NOT EXISTS confidence FLOAT;
 """
 
 # Rapports de drift Evidently (IVDR 2017/746)
@@ -296,6 +297,28 @@ def _populate_reference_features(
         print("  [KO] Pillow/numpy non installés — reference_features non peuplée")
         return
 
+    # Confiance de référence : vraie distribution obtenue en faisant tourner le
+    # modèle @production sur les images de référence, plutôt qu'un proxy fixe
+    # (nécessaire pour que le drift de confidence soit statistiquement valide).
+    # Échec silencieux — la population des features ne doit pas en dépendre.
+    infer_confidence = None
+    try:
+        import torch
+        from src.serving.api import load_model, transform as api_transform, DEVICE as API_DEVICE
+
+        api_model = load_model()
+
+        def _infer_confidence(img):
+            tensor = api_transform(img).unsqueeze(0).to(API_DEVICE)
+            with torch.no_grad():
+                probs = torch.softmax(api_model(tensor), dim=1)
+            return float(probs.max().item())
+
+        infer_confidence = _infer_confidence
+        print("  [OK] Modèle chargé — confiance de référence calculée")
+    except Exception as e:
+        print(f"  [warn] Modèle indisponible — reference_features.confidence restera NULL ({e})")
+
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM reference_features")
     n_existing = cur.fetchone()[0]
@@ -334,6 +357,7 @@ def _populate_reference_features(
             img = PILImage.open(img_path).convert("RGB")
             arr = np.array(img, dtype=np.float32)
             gray = arr.mean(axis=2)
+            confidence = infer_confidence(img) if infer_confidence else None
             batch.append((
                 r["true_class"],
                 float(gray.mean()),
@@ -343,6 +367,7 @@ def _populate_reference_features(
                 float(arr[:, :, 2].mean()),
                 int(img.size[0]),
                 int(img.size[1]),
+                confidence,
             ))
         except Exception:
             skipped += 1
@@ -352,8 +377,8 @@ def _populate_reference_features(
             cur.executemany("""
                 INSERT INTO reference_features
                     (class_name, mean_brightness, std_brightness,
-                     mean_r, mean_g, mean_b, image_width, image_height)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     mean_r, mean_g, mean_b, image_width, image_height, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, batch)
             inserted += len(batch)
             batch = []
@@ -363,8 +388,8 @@ def _populate_reference_features(
         cur.executemany("""
             INSERT INTO reference_features
                 (class_name, mean_brightness, std_brightness,
-                 mean_r, mean_g, mean_b, image_width, image_height)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 mean_r, mean_g, mean_b, image_width, image_height, confidence)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, batch)
         inserted += len(batch)
 

@@ -81,6 +81,27 @@ def _rotate_reference_with_batch(batch_name: str) -> None:
         print(f"[warn] rotation référence ignorée — dossier introuvable : {batch_dir}")
         return
 
+    # Confiance de référence réelle (vs proxy fixe) — échec silencieux si le
+    # modèle n'est pas chargeable depuis ce contexte.
+    infer_confidence = None
+    try:
+        import sys
+        sys.path.insert(0, PROJECT_DIR)
+        import torch
+        from src.serving.api import load_model, transform as api_transform, DEVICE as API_DEVICE
+
+        api_model = load_model()
+
+        def _infer_confidence(img):
+            tensor = api_transform(img).unsqueeze(0).to(API_DEVICE)
+            with torch.no_grad():
+                probs = torch.softmax(api_model(tensor), dim=1)
+            return float(probs.max().item())
+
+        infer_confidence = _infer_confidence
+    except Exception as e:
+        print(f"[warn] confiance de référence ignorée — modèle indisponible : {e}")
+
     try:
         conn = psycopg2.connect(
             host=os.environ.get("SUPABASE_HOST"),
@@ -104,12 +125,14 @@ def _rotate_reference_with_batch(batch_name: str) -> None:
                     img = PILImage.open(img_path).convert("RGB")
                     arr = np.array(img, dtype=np.float32)
                     gray = arr.mean(axis=2)
+                    confidence = infer_confidence(img) if infer_confidence else None
                     rows.append((
                         cls,
                         float(gray.mean()), float(gray.std()),
                         float(arr[:, :, 0].mean()), float(arr[:, :, 1].mean()),
                         float(arr[:, :, 2].mean()),
                         int(img.size[0]), int(img.size[1]),
+                        confidence,
                     ))
                 except Exception:
                     continue
@@ -118,12 +141,15 @@ def _rotate_reference_with_batch(batch_name: str) -> None:
             cur.executemany("""
                 INSERT INTO reference_features
                     (class_name, mean_brightness, std_brightness,
-                     mean_r, mean_g, mean_b, image_width, image_height)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     mean_r, mean_g, mean_b, image_width, image_height, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, rows)
             conn.commit()
-            print(f"[OK] référence enrichie : +{len(rows)} images de {batch_name} "
-                  f"({', '.join(f'{cls}: {sum(1 for r in rows if r[0]==cls)}' for cls in sorted(set(r[0] for r in rows)))})")
+            per_class = ", ".join(
+                f"{cls}: {sum(1 for r in rows if r[0] == cls)}"
+                for cls in sorted(set(r[0] for r in rows))
+            )
+            print(f"[OK] référence enrichie : +{len(rows)} images de {batch_name} ({per_class})")
         cur.close()
         conn.close()
     except Exception as e:
