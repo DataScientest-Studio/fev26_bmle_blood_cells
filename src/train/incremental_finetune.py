@@ -61,6 +61,11 @@ CLASS_NAMES = [
     "basophil", "eosinophil", "erythroblast", "ig",
     "lymphocyte", "monocyte", "neutrophil", "platelet",
 ]
+# Noms capitalisés tels qu'ils sont stockés dans la table predictions (identiques à l'API)
+API_CLASS_NAMES = [
+    "Basophil", "Eosinophil", "Erythroblast", "IG",
+    "Lymphocyte", "Monocyte", "Neutrophil", "Platelet",
+]
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
@@ -148,6 +153,65 @@ def evaluate(model, loader, criterion, device):
     return running_loss / total, correct / total
 
 
+def _log_batch_to_predictions(champion_state: dict, batch_dir: Path, model_version: str, device: str) -> None:
+    """Logue les prédictions du modèle @production sur un batch non promu dans Supabase.
+    Permet au drift monitoring de voir ces images comme données 'en production'.
+    Echec silencieux — ne doit jamais bloquer le pipeline."""
+    try:
+        from src.auth.db import get_connection
+        from torchvision.models import densenet121 as _densenet121
+
+        champ = _densenet121(weights=None)
+        champ.classifier = nn.Linear(champ.classifier.in_features, len(CLASS_NAMES))
+        champ.load_state_dict(champion_state)
+        champ = champ.to(device)
+        champ.eval()
+
+        tf = get_transform()
+        paths, _ = load_dataset_paths(batch_dir)
+        conn = get_connection()
+        cur = conn.cursor()
+        logged = 0
+
+        with torch.no_grad():
+            for img_path in paths:
+                try:
+                    pil_img = Image.open(img_path).convert("RGB")
+                    arr = np.array(pil_img, dtype=np.float32)
+                    gray = arr.mean(axis=2)
+                    probs = torch.softmax(champ(tf(pil_img).unsqueeze(0).to(device)), dim=1)
+                    pred_idx = int(probs.argmax().item())
+                    cur.execute(
+                        """
+                        INSERT INTO predictions
+                            (image_name, predicted_class, confidence, model_version,
+                             mean_brightness, std_brightness, mean_r, mean_g, mean_b,
+                             image_width, image_height, triggered_by)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        (
+                            img_path.name,
+                            API_CLASS_NAMES[pred_idx],
+                            round(float(probs[0, pred_idx].item()), 3),
+                            model_version,
+                            float(gray.mean()), float(gray.std()),
+                            float(arr[:, :, 0].mean()), float(arr[:, :, 1].mean()), float(arr[:, :, 2].mean()),
+                            pil_img.size[0], pil_img.size[1],
+                            f"finetune_batch_{batch_dir.name}",
+                        ),
+                    )
+                    logged += 1
+                except Exception:
+                    pass
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"  [predictions] {logged}/{len(paths)} images → Supabase (triggered_by=finetune_batch_{batch_dir.name})")
+    except Exception as e:
+        print(f"  [warn] Supabase (batch predictions) indisponible : {e}")
+
+
 @torch.no_grad()
 def predict_all(model, loader, device):
     model.eval()
@@ -223,6 +287,9 @@ def main():
 
     model = mlflow.pytorch.load_model(f"models:/{MLFLOW_MODEL_NAME}@production", map_location="cpu")
     model = model.to(device)
+    # Sauvegarde des poids du champion avant fine-tuning — utilisés pour loguer
+    # les prédictions sur le batch si celui-ci n'est pas promu.
+    champion_state_dict = {k: v.clone() for k, v in model.state_dict().items()}
 
     # ── Données du lot (train/val internes pour l'early stopping) ───────────
     paths, labels = load_dataset_paths(batch_dir)
@@ -370,6 +437,7 @@ def main():
                     reasons.insert(0, f"macro_f1 {macro_f1:.4f} < {prod_f1:.4f}")
                 print(f"  [KO] v{mv.version} reste @challenger : {' | '.join(reasons)}")
                 status = "challenger"
+                _log_batch_to_predictions(champion_state_dict, batch_dir, prod_mv.version, device)
 
         finally:
             resource_summary = monitor.stop()
