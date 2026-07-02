@@ -330,7 +330,7 @@ def _section_confidence_drift(metrics: dict) -> str:
 def _section_model_drift(metrics: dict) -> str:
     md = metrics.get("model_drift", {})
     header = _section_num(
-        4, "Désaccord Médecin",
+        4, "Revue du Médecin",
         "Feedback clinicien — seule métrique avec ground truth réel",
     )
     if not md:
@@ -342,7 +342,6 @@ def _section_model_drift(metrics: dict) -> str:
         )
 
     n = md.get("n_feedback", 0)
-    n_total = md.get("n_total_predictions", 0)
     coverage = md.get("coverage_rate", 0.0)
     accuracy = md.get("accuracy", 0.0)
     disagree = md.get("disagree_rate", 0.0)
@@ -350,11 +349,11 @@ def _section_model_drift(metrics: dict) -> str:
     lv = _lvl(level)
 
     coverage_html = (
-        f'<div style="background:#f1f5f9;border-radius:8px;padding:10px 16px;'
-        f'margin-bottom:16px;font-size:13px;color:#475569;">'
-        f'Taux de couverture : <strong style="color:#0f172a;">{coverage:.0%}</strong> '
-        f'— feedback reçu sur <strong>{n}</strong> des <strong>{n_total}</strong> images analysées'
-        f'</div>'
+        '<div style="background:#f1f5f9;border-radius:8px;padding:10px 16px;'
+        'margin-bottom:16px;font-size:13px;color:#475569;">'
+        '<strong style="color:#0f172a;">Taux de couverture</strong> : proportion des prédictions '
+        'du modèle ayant reçu un retour (accord ou désaccord) du médecin.'
+        '</div>'
     )
 
     _card_style = "border-radius:12px;padding:20px;text-align:center;"
@@ -398,7 +397,7 @@ def build_showcase_html(report: dict) -> str:
     created_at = str(report.get("created_at", ""))[:19].replace("T", " ")
     n_ref = report.get("n_reference", 0)
     n_cur = report.get("n_current", 0)
-    model_version = report.get("model_version") or "non spécifié"
+    model_version = "DenseNet-121"
 
     header_html = (
         '<div style="background:#1e293b;border-radius:14px;padding:32px;'

@@ -385,7 +385,7 @@ async def gradcam_predict(
         gradcam_b64 = base64.b64encode(buf.getvalue()).decode()
 
         prediction_id = _log_prediction(
-            file.filename, CLASSES[pred_idx], round(confidence, 3),
+            file.filename, CLASSES[pred_idx], round(confidence, 3), pil_img,
             patient_id=patient_id, patient_name=patient_name, triggered_by=triggered_by,
         )
 

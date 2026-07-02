@@ -1119,71 +1119,25 @@ def show_drift_tab() -> None:
     """, unsafe_allow_html=True)
 
     st.markdown('<h2 style="color:#0f172a;font-weight:700;">Monitoring du drift (IVDR 2017/746)</h2>', unsafe_allow_html=True)  # noqa: E501
+    st.markdown(
+        '<p style="color:#334155;font-size:14px;margin-top:-4px;">'
+        "L'<strong>IVDR 2017/746</strong> est le règlement européen sur les dispositifs médicaux "
+        "de diagnostic in vitro : il impose une surveillance continue des performances après mise "
+        "sur le marché (post-market surveillance). L'<strong>ISO 14971</strong> est la norme de "
+        "gestion des risques applicable aux dispositifs médicaux — pour une solution diagnostique "
+        "en santé, elle impose d'identifier, d'évaluer et de traiter les risques liés à une dérive "
+        "du modèle qui pourrait conduire à une erreur de diagnostic."
+        '</p>',
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("""
-    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;
-                  background:white;border-radius:10px;overflow:hidden;
-                  box-shadow:0 1px 4px rgba(0,0,0,0.07);border:1px solid #e2e8f0;">
-      <thead>
-        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
-          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Niveau</th>
-          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Score</th>
-          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Signification</th>
-          <th style="padding:10px 14px;text-align:left;color:#0f172a;font-weight:700;">Action IVDR</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span
-            style="background:#dcfce7;color:#14532d;border:1px solid #16a34a;
-            border-radius:6px;padding:3px 10px;font-weight:700;">✅ Normal</span></td>
-          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">&lt; 0.10</td>
-          <td style="padding:10px 14px;color:#334155;">Aucun drift significatif</td>
-          <td style="padding:10px 14px;color:#334155;">Aucune action requise</td>
-        </tr>
-        <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span
-            style="background:#fef9c3;color:#713f12;border:1px solid #ca8a04;
-            border-radius:6px;padding:3px 10px;font-weight:700;">⚠️ Warning</span></td>
-          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.10 – 0.20</td>
-          <td style="padding:10px 14px;color:#334155;">Drift léger détecté</td>
-          <td style="padding:10px 14px;color:#334155;">Surveillance renforcée</td>
-        </tr>
-        <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:10px 14px;"><span
-            style="background:#ffedd5;color:#7c2d12;border:1px solid #ea580c;
-            border-radius:6px;padding:3px 10px;font-weight:700;">🟠 Alerte</span></td>
-          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">0.20 – 0.30</td>
-          <td style="padding:10px 14px;color:#334155;">Drift modéré</td>
-          <td style="padding:10px 14px;color:#334155;">Analyse + envisager ré-entraînement (MDCG 2020-1)</td>
-        </tr>
-        <tr>
-          <td style="padding:10px 14px;"><span
-            style="background:#fee2e2;color:#7f1d1d;border:1px solid #dc2626;
-            border-radius:6px;padding:3px 10px;font-weight:700;">🔴 Critique</span></td>
-          <td style="padding:10px 14px;color:#0f172a;font-weight:700;">≥ 0.30</td>
-          <td style="padding:10px 14px;color:#334155;">Drift sévère</td>
-          <td style="padding:10px 14px;color:#334155;">Investigation immédiate obligatoire (ISO 14971 §9)</td>
-        </tr>
-      </tbody>
-    </table>
-    """, unsafe_allow_html=True)
-
-    col_gen, col_ver = st.columns([2, 1])
-    with col_ver:
-        model_version_input = st.text_input(
-            "Version modele (vide = toutes)", value="", key="drift_model_version"
-        )
-    with col_gen:
-        generate = st.button("Generer le rapport de drift", type="primary")
+    generate = st.button("Generer le rapport de drift", type="primary")
 
     if generate:
         with st.spinner("Generation du rapport Evidently en cours..."):
             try:
                 from src.evidently.drift_report import generate_report
-                result = generate_report(
-                    model_version=model_version_input.strip() or None
-                )
+                result = generate_report(model_version=None)
                 if "error" in result:
                     st.error(result["error"])
                     return
