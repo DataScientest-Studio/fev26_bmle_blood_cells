@@ -1,24 +1,16 @@
 """
 DAG Airflow — Fine-tuning incrémental sur un lot TIFF (générations V2+)
 
-Planifié chaque dimanche 4h (apres le DAG d'entrainement complet de 2h, pour
-ne pas se disputer le GPU Windows) : simule l'arrivee reguliere de nouvelles
-donnees en consommant un nouveau lot data/lotstiff/batchN a chaque execution
-(le prochain index est suivi via l'Airflow Variable
-lotstiff_next_batch_idx). Le numero de generation est lui aussi calcule
-automatiquement (cf. next_generation() dans _common.py). Si tous les lots
-disponibles ont deja ete consommes, le DAG se termine sans rien faire.
+Planifié chaque dimanche 4h : consomme le prochain lot data/lotstiff/batchN,
+fine-tune le modèle @production sur le PC Windows (GPU), promeut si
+macro_f1 >= champion, puis enchaîne automatiquement le calcul du drift
+Evidently + envoi d'alerte email.
 
-Declenchement manuel toujours possible avec batch/generation explicites
-(params, "Trigger DAG w/ config") pour rejouer un lot precis.
-
-Le lot (data/lotstiff/batchN, tracke via DVC sur DagsHub — vraies copies,
-pas de symlinks) est d'abord recupere sur le PC Windows via git pull +
-dvc pull, puis src/train/incremental_finetune.py charge le modèle
-@production courant, le fine-tune (avec un buffer de replay Mendeley pour
-éviter l'oubli catastrophique), évalue sur un set de référence, et décide
-lui-même de la promotion — ce DAG vérifie ensuite le résultat et
-synchronise si besoin.
+Flux complet :
+  determine_batch → transfer_batch → finetune_model → check_promotion
+    → promote_success → sync_to_datalake → pipeline_done
+    → no_promotion    ↗
+  pipeline_done → [generate_drift_report ‖ check_performance] → send_alert_if_needed
 """
 
 import os
@@ -210,7 +202,81 @@ done = BashOperator(
 )
 
 
+# ── Tasks 8-10 : Drift monitoring (enchaîné après pipeline_done) ──────────────
+def _generate_drift_report(**context):
+    import sys
+    sys.path.insert(0, "/opt/airflow/project")
+    from src.evidently.drift_report import generate_report
+
+    result = generate_report(model_version=None)
+    if "error" in result:
+        raise RuntimeError(f"Rapport drift impossible : {result['error']}")
+
+    print(
+        f"Rapport drift généré (id={result['report_id']}) — "
+        f"data_drift={result['data_drift_score']:.3f} [{result['data_drift_level']}], "
+        f"pred_drift={result['pred_drift_score']:.3f} [{result['pred_drift_level']}], "
+        f"features driftées={result['n_drifted_features']}"
+    )
+    context["ti"].xcom_push(key="drift_result", value={
+        k: v for k, v in result.items() if k != "report_html"
+    })
+
+
+def _check_performance(**context):
+    import sys
+    sys.path.insert(0, "/opt/airflow/project")
+    from src.evidently.drift_report import load_performance_metrics
+
+    perf = load_performance_metrics()
+    serializable_perf = {
+        "alerts":        perf.get("alerts", []),
+        "n_generations": perf.get("n_generations", 0),
+        "baseline":      perf.get("baseline", {}),
+        "current":       perf.get("current", {}),
+    }
+    if perf.get("alerts"):
+        for alert in perf["alerts"]:
+            print(f"⚠ {alert}")
+    else:
+        print(f"Performance OK sur {perf.get('n_generations', 0)} générations.")
+    context["ti"].xcom_push(key="perf_result", value=serializable_perf)
+
+
+def _send_alert_if_needed(**context):
+    import sys
+    sys.path.insert(0, "/opt/airflow/project")
+    from src.monitoring.email_alert import send_drift_alert
+
+    drift_result = context["ti"].xcom_pull(task_ids="generate_drift_report", key="drift_result")
+    perf_result  = context["ti"].xcom_pull(task_ids="check_performance", key="perf_result")
+    sent = send_drift_alert(drift_result=drift_result, perf_result=perf_result, min_level="warning")
+    if not sent:
+        print("Aucune alerte — tous les indicateurs sont dans les seuils normaux.")
+
+
+generate_drift_report = PythonOperator(
+    task_id="generate_drift_report",
+    python_callable=_generate_drift_report,
+    dag=dag,
+)
+
+check_performance = PythonOperator(
+    task_id="check_performance",
+    python_callable=_check_performance,
+    dag=dag,
+)
+
+send_alert_if_needed = PythonOperator(
+    task_id="send_alert_if_needed",
+    python_callable=_send_alert_if_needed,
+    trigger_rule=TriggerRule.ALL_SUCCESS,
+    dag=dag,
+)
+
+
 # ── Dépendances ────────────────────────────────────────────────────────────────
 determine_batch_and_generation >> transfer_batch >> finetune >> check_promotion >> [promote_success, no_promotion]
 promote_success >> sync >> done
 no_promotion >> done
+done >> [generate_drift_report, check_performance] >> send_alert_if_needed
